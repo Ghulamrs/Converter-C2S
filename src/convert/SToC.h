@@ -121,8 +121,12 @@ private:
     void printItem(shalimar::Expr &item);
     CStmtPtr declStmtFor(const std::string &name, CTypePtr type, CExprPtr init);
 
+    // No Diagnostics is held. A construct with no expression in the target
+    // language is refused by markBeyond - a marker in the tree and a count -
+    // rather than by a message on the side, so there is nothing here to
+    // report through. The constructor still takes one for the day that
+    // changes, and for the symmetry of the two directions.
     const Source &source_;
-    Diagnostics &diagnostics_;
 
     std::unique_ptr<CProgram> program_;
     CCompound *block_ = nullptr;             // where statements land

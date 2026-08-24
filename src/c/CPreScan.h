@@ -46,9 +46,16 @@ public:
 
     const std::vector<Include> &includes() const { return includes_; }
 
+    // The directives awaiting a decision, as written, in file order - the
+    // same set run() returned false for, in the form a caller shows the
+    // user. The diagnostics say where each one is and what to do about it;
+    // this is the list itself, for a caller with no console to print to.
+    const std::vector<std::string> &pending() const { return pending_; }
+
 private:
     std::string text_;
     std::vector<Include> includes_;
+    std::vector<std::string> pending_;
 };
 
 }  // namespace c2s

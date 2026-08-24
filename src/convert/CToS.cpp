@@ -53,7 +53,9 @@ shalimar::ExprPtr sInt(long long value) {
 }  // namespace
 
 CToS::CToS(const Source &source, Diagnostics &diagnostics)
-    : source_(source), diagnostics_(diagnostics) {}
+    : source_(source) {
+    (void)diagnostics;
+}
 
 // ------------------------------------------------------------------ helpers
 

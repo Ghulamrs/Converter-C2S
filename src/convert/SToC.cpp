@@ -72,7 +72,9 @@ void flattenLiteral(shalimar::ArrayLit &lit, std::vector<shalimar::Expr *> *out)
 }  // namespace
 
 SToC::SToC(const Source &source, Diagnostics &diagnostics)
-    : source_(source), diagnostics_(diagnostics) {}
+    : source_(source) {
+    (void)diagnostics;
+}
 
 // ------------------------------------------------------------------ helpers
 

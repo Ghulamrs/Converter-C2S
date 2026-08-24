@@ -56,11 +56,21 @@ bool parseInclude(const std::string &line, std::size_t afterName,
     return true;
 }
 
+// The directive as the author wrote it: from the '#' to the last thing on
+// the line. The leading indent goes, because the list is read as a list.
+std::string asWritten(const std::string &line, std::size_t hash) {
+    std::size_t end = line.size();
+    while (end > hash && (line[end - 1] == ' ' || line[end - 1] == '\t' ||
+                          line[end - 1] == '\r')) --end;
+    return line.substr(hash, end - hash);
+}
+
 }  // namespace
 
 bool CPreScan::run(const Source &source, Diagnostics &diagnostics) {
     text_ = source.text();
     includes_.clear();
+    pending_.clear();
 
     bool clean = true;
 
@@ -91,11 +101,13 @@ bool CPreScan::run(const Source &source, Diagnostics &diagnostics) {
             diagnostics.report(Severity::PreprocessorFix, source, where, "P0100",
                                "a '#' line the converter does not read",
                                "remove it before converting");
+            pending_.push_back(asWritten(line, i));
             clean = false;
         } else {
             diagnostics.report(Severity::PreprocessorFix, source, where, "P0101",
                                "#" + name + " must be resolved before conversion",
                                adviceFor(name));
+            pending_.push_back(asWritten(line, i));
             clean = false;
         }
 

@@ -128,8 +128,12 @@ private:
     int lineOf(std::size_t offset) const;
     std::vector<std::string> sourceLinesAt(std::size_t offset) const;
 
+    // No Diagnostics is held. A construct with no expression in the target
+    // language is refused by markBeyond - a marker in the tree and a count -
+    // rather than by a message on the side, so there is nothing here to
+    // report through. The constructor still takes one for the day that
+    // changes, and for the symmetry of the two directions.
     const Source &source_;
-    Diagnostics &diagnostics_;
 
     std::unique_ptr<shalimar::Program> program_;
     shalimar::Block *block_ = nullptr;

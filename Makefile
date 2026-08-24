@@ -16,9 +16,13 @@ BINDIR ?= .
 OBJDIR := obj
 TARGET := $(BINDIR)/c2s.exe
 
+# src/s/vendor is the Shalimar front end carried over from Compiler-S. It is
+# a copy, not a link - see CLAUDE.md - and it has to be compiled here like
+# everything else, or every shalimar:: symbol goes missing at the link.
 SRCS := $(wildcard src/*.cpp) \
         $(wildcard src/c/*.cpp) \
         $(wildcard src/s/*.cpp) \
+        $(wildcard src/s/vendor/*.cpp) \
         $(wildcard src/convert/*.cpp)
 
 OBJS := $(patsubst src/%.cpp,$(OBJDIR)/%.o,$(SRCS))
