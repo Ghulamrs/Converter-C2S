@@ -1,0 +1,18 @@
+Package: c2sr
+Type: Package
+Title: Convert Between C89 and Shalimar in RStudio
+Version: 0.2.0
+Author: G. R. Akhtar
+Maintainer: G. R. Akhtar <akhtar170313@gmail.com>
+Description: The Converter-C2S library as an RStudio addin. Converts the
+    active editor document between C89 and Shalimar, in either direction,
+    opening the result in a new editor tab and reporting diagnostics in the
+    console. Constructs with no translation are carried into the output as
+    comment breaks tagged BEYOND SHALIMAR; preprocessor constructs that need
+    a decision are listed so each can be resolved by hand first. The engine
+    is ISO C++14 and does no console work of its own.
+License: file LICENSE
+Encoding: UTF-8
+Suggests: rstudioapi
+SystemRequirements: C++14
+NeedsCompilation: yes

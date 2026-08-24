@@ -1,0 +1,4 @@
+useDynLib(c2sr)
+export(c2sConvert)
+export(c2sConvertActiveDocument)
+export(c2sCanonicaliseActiveDocument)

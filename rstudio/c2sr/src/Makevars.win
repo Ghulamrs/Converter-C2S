@@ -1,0 +1,14 @@
+# Built by R CMD INSTALL. The engine sources are copied under core/ by the
+# repository's 'make rpkg' target - run that before installing, or install
+# the archive it produces. ISO C++14, as everything in this project is.
+CXX_STD = CXX14
+PKG_CPPFLAGS = -I.
+
+SOURCES = rglue.cpp \
+          $(wildcard core/*.cpp) \
+          $(wildcard core/c/*.cpp) \
+          $(wildcard core/s/*.cpp) \
+          $(wildcard core/s/vendor/*.cpp) \
+          $(wildcard core/convert/*.cpp)
+
+OBJECTS = $(SOURCES:.cpp=.o)

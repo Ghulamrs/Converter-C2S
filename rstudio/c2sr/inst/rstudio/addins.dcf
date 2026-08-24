@@ -1,0 +1,9 @@
+Name: Convert C <-> Shalimar
+Description: Convert the active document between C89 and Shalimar, opening the result in a new tab.
+Binding: c2sConvertActiveDocument
+Interactive: false
+
+Name: Canonicalise C or Shalimar
+Description: Parse the active document with its own front end and reprint it in canonical form.
+Binding: c2sCanonicaliseActiveDocument
+Interactive: false
