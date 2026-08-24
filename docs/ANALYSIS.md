@@ -224,19 +224,55 @@ source has to become one or more `//` lines if comments are carried across at al
 
 ### 6.3 Must raise a conversion error
 
-Grouped as the converter will report them.
+Grouped as the converter reports them. Unlike the rest of this document, this
+section is **maintained against the code** — README points at it as the
+catalogue — and was corrected on 2026-08-25, where what was built turned out
+to differ from what was proposed. `tests/cases/beyond/` holds a case per group.
 
 **No representation at all** — pointers (`T *`, `&x`, `*p`, pointer arithmetic,
 `NULL`), `struct`, `union`, `enum` as a *type*, `typedef`, `void *`, function
-pointers, variadic functions and `<stdarg.h>`, `goto` and labels, `static`/`extern`/
-`register`/`auto`, `const`/`volatile`, `unsigned`/`signed`/`short`/`long`/`long long`,
-`long double`, multi-dimensional `char` (`char[][]` is refused — *"strings are 1-D"*),
-arrays of strings, designated initialisers, zero-length arrays.
+pointers, `goto` and labels, `extern`, a `static` **inside a function**,
+`unsigned`/`short`/`long`/`long long`, `long double`, multi-dimensional `char`
+(`char[][]` is refused — *"strings are 1-D"*), arrays of strings, designated
+initialisers, zero-length arrays.
 
 **Absent operators** — `&`, `|`, `^`, `~`, `<<`, `>>` (bitwise: in Shalimar `&` and
-`|` are *logical*, `^` is *power*, `~`/`<<`/`>>` are not tokens), `!`, unary `+`, the
-comma operator, `sizeof`, assignment-as-an-expression (`a = b = c`,
-`while ((c = f()) != 0)`).
+`|` are *logical*, `^` is *power*, `~`/`<<`/`>>` are not tokens), the comma
+operator, `sizeof`, and an assignment used as a **value** inside a larger
+expression (`while ((c = f()) != 0)`).
+
+**Accepted, and dropped rather than refused.** These were listed above as
+refusals and are not, because none of them changes what the program does in a
+language with one translation unit and three scalars:
+
+- `register` and `auto` — hints with no effect on meaning in C89.
+- `signed int` — the same type as `int`.
+- A **file-scope** `static` — it says "not visible to other translation units",
+  and a Shalimar program is whole, so there are none. A `static` inside a
+  function is a different matter and is refused: it would keep its value
+  between calls, which is meaning, and there is nowhere to keep it.
+- `const` and `volatile` — dropped. `const` costs a compile-time guarantee
+  only. **`volatile` is the one that loses something real**, and it is dropped
+  silently; nothing in this converter is looking at hardware, but the day
+  something is, this is where it will have gone wrong.
+
+**Lowered rather than refused.** All three were listed above as conversion
+errors. The converter does better, and each is exercised by
+`tests/cases/beyond/operators.c` so it stays that way:
+
+- `!x` becomes `x = 0`, which is exact — `:` is assignment in Shalimar and `=`
+  is the equality test.
+- Unary `+x` is the identity, so it becomes `x`.
+- `a = b = c` as a whole statement lifts into two statements in order. Only an
+  assignment reaching an enclosing *expression* is refused.
+
+**Variadic functions** are refused, but not as variadic: a call to one is
+turned down for being a name neither defined in the file nor one of the twenty
+builtins. A *definition* never gets that far — it needs `va_list`, a typedef
+from a header this converter drops unread, so the parser meets two identifiers
+and reports a syntax error. The "headers are not converted" rule holds for
+calls, which C89 lets you read without a prototype; it does not hold for names
+a header would have introduced as **types**. See `tests/cases/beyond/variadic.c`.
 
 **Absent library** — the whole of `<stdio.h>`, `<stdlib.h>`, `<string.h>`,
 `<ctype.h>`, `<time.h>`, `<assert.h>`, `errno`, `malloc`/`free`. `<math.h>` is the one
