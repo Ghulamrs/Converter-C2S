@@ -5,3 +5,5 @@ c2s.exe
 *.dSYM/
 .DS_Store
 tests/out/
+.c2s-deploy.tgz
+_to_delete/
