@@ -1,0 +1,825 @@
+#include "Parser.h"
+
+namespace shalimar {
+
+Parser::Parser(const std::vector<Token> &tokens, Diagnostics &diagnostics, int unit)
+    : tokens_(tokens), diag_(diagnostics), unit_(unit) {}
+
+const Token &Parser::peek(size_t ahead) const {
+    static const Token endOfInput;
+    size_t k = index_ + ahead;
+    return k < tokens_.size() ? tokens_[k] : endOfInput;
+}
+
+bool Parser::atOperator(const char *spelling) const {
+    return current().kind == Tok::Operator && current().text == spelling;
+}
+
+const Token &Parser::advance() {
+    const Token &t = current();
+    if (index_ < tokens_.size()) ++index_;
+    return t;
+}
+
+bool Parser::match(Tok kind) {
+    if (!at(kind)) return false;
+    advance();
+    return true;
+}
+
+int Parser::lastLine() const {
+    return tokens_.empty() ? 1 : tokens_.back().line;
+}
+
+std::string Parser::unexpected() const {
+    if (current().kind == Tok::EndOfInput) return "Program ends unfinished";
+    return "Unexpected '" + spellingOf(current()) + "'";
+}
+
+void Parser::fail(const std::string &text) {
+    fail(current().line, text);
+}
+
+void Parser::fail(int line, const std::string &text) {
+    if (failed_) return;
+    diag_.error(unit_, line > 0 ? line : lastLine(), text);
+    failed_ = true;
+}
+
+bool Parser::expect(Tok kind, const std::string &text) {
+    if (match(kind)) return true;
+    fail(text);
+    return false;
+}
+
+bool Parser::startsLine(size_t at) const {
+    if (at == 0) return true;
+    if (at >= tokens_.size()) return false;
+    return tokens_[at].line != tokens_[at - 1].line;
+}
+
+std::unique_ptr<Program> Parser::parse() {
+    std::unique_ptr<Program> program(new Program());
+
+    // Only declarations and 'fun' definitions may appear at global scope; a
+    // statement there is an error naming itself.
+    while (index_ < tokens_.size() && !failed_) {
+        if (at(Tok::Fun)) {
+            std::unique_ptr<Function> f = parseFunction();
+            if (failed_ || !f) return nullptr;
+            program->add(std::move(f));
+            continue;
+        }
+        if (atDeclaration()) {
+            StmtPtr declaration = parseDeclaration();
+            if (failed_ || !declaration) return nullptr;
+            program->addGlobal(std::move(declaration));
+            continue;
+        }
+        if (current().kind == Tok::EndOfInput) { fail("Program ends unfinished"); return nullptr; }
+        fail("'" + spellingOf(current()) + "' must be inside a function");
+        return nullptr;
+    }
+    return failed_ ? nullptr : std::move(program);
+}
+
+// fun <outputs> = name(inputs) { body }
+//
+// '=' does duty as the separator between the output list and the name, which
+// is the cause of the '>=' case below rather than a design. Because the lexer
+// matches the longest operator first, 'fun <>= main()' - the closing '>' of
+// the list written hard against the separator - arrives as one '>=' token.
+// That spelling parsed before '>=' was an operator at all, so it is read here
+// as the '>' plus the '=' rather than silently breaking programs over an
+// operator they do not use.
+std::unique_ptr<Function> Parser::parseFunction() {
+    Prototype proto;
+    proto.line = current().line;
+    advance();                                            // 'fun'
+
+    if (!atOperator("<")) { failUnexpected(); return nullptr; }
+    advance();
+
+    // The output list holds types. '<r>' named a variable in 2.x; it is a
+    // parse error now, because 'r' is not a type.
+    while (!atOperator(">") && !atOperator(">=")) {
+        const Type *type = scalarTypeHere();
+        if (!type) { failUnexpected(); return nullptr; }
+        proto.outputs.push_back(type);
+        if (!match(Tok::Comma)) break;
+    }
+
+    if (atOperator(">=")) {
+        advance();
+    } else {
+        if (!atOperator(">")) { failUnexpected(); return nullptr; }
+        advance();
+        if (!atOperator("=")) { failUnexpected(); return nullptr; }
+        advance();
+    }
+
+    if (!at(Tok::Identifier)) { failUnexpected(); return nullptr; }
+    proto.name = advance().text;
+
+    if (!expect(Tok::ParensOpen, unexpected())) return nullptr;
+    while (!at(Tok::ParensClose)) {
+        Param parameter;
+        if (atOperator("&")) { advance(); parameter.byReference = true; }
+        if (!at(Tok::Identifier)) { failUnexpected(); return nullptr; }
+        parameter.name = advance().text;
+
+        int rank = 0;
+        while (at(Tok::BracketOpen)) {
+            advance();
+            if (!expect(Tok::BracketClose, unexpected())) return nullptr;
+            ++rank;
+        }
+        if (!expect(Tok::Assign, unexpected())) return nullptr;
+        const Type *scalar = scalarTypeHere();
+        if (!scalar) { failUnexpected(); return nullptr; }
+
+        const Type *type = scalar;
+        for (int i = 0; i < rank; ++i) type = Type::arrayOf(type);
+        parameter.type = type;
+        // An array is a reference always; '&' says so for a scalar.
+        if (rank > 0) parameter.byReference = false;
+        proto.inputs.push_back(parameter);
+        if (!match(Tok::Comma)) break;
+    }
+    if (!expect(Tok::ParensClose, unexpected())) return nullptr;
+
+    proto.unit = unit_;
+    blockDepth_ = 0;
+    Block body = parseBlock();
+    if (failed_) return nullptr;
+
+    return std::unique_ptr<Function>(new Function(std::move(proto), std::move(body)));
+}
+
+Block Parser::parseBlock() {
+    Block body;
+    if (!expect(Tok::BraceOpen, "Missing '{' to start block")) return body;
+    ++blockDepth_;
+
+    // The loop detects end of input by the index rather than by a terminator
+    // token, because tokenize() emits none.
+    while (index_ < tokens_.size() && !at(Tok::BraceClose)) {
+        StmtPtr s = parseStatement();
+        if (failed_) { --blockDepth_; return body; }
+        if (s) body.push_back(std::move(s));
+    }
+    --blockDepth_;
+    if (!expect(Tok::BraceClose, "Missing '}' to close block")) return body;
+    return body;
+}
+
+// Every statement is stamped with the file it was read from as it leaves the
+// parser, so that nothing below has to be told twice.
+StmtPtr Parser::parseStatement() {
+    StmtPtr made = parseStatementBody();
+    if (made) made->setUnit(unit_);
+    return made;
+}
+
+StmtPtr Parser::parseStatementBody() {
+    if (at(Tok::PrintLine) || at(Tok::PrintInline)) return parsePrint();
+    if (atDeclaration()) {
+        if (blockDepth_ > 1) {
+            const std::string name = peek(1).kind == Tok::Identifier ? peek(1).text
+                                                                     : spellingOf(peek(1));
+            fail("'" + name + "': declare it at the top of the function");
+            return nullptr;
+        }
+        return parseDeclaration();
+    }
+    if (at(Tok::If))    return parseIf();
+    if (at(Tok::While)) return parseWhile();
+    if (at(Tok::For))   return parseFor();
+
+    if (at(Tok::Break) || at(Tok::Continue)) {
+        const bool isBreak = at(Tok::Break);
+        const int line = advance().line;
+        if (loopDepth_ == 0) {
+            fail(line, std::string("'") + (isBreak ? "break" : "continue") +
+                       "' outside a loop");
+            return nullptr;
+        }
+        if (isBreak) return StmtPtr(new Break(line));
+        return StmtPtr(new Continue(line));
+    }
+
+    // An identifier followed by one of the four assignment spellings can only
+    // begin a statement. That is the whole of how a statement boundary is
+    // found here: there is no terminator, and the parser decides by what it
+    // is looking at.
+    if (at(Tok::Return)) return parseReturn();
+    if (atOperator("<") && looksLikeMultiAssignHeader(index_)) return parseMultiAssign();
+
+    if (at(Tok::Identifier)) {
+        Tok next = peek(1).kind;
+        // An index chain may stand between the name and the assignment.
+        if (next == Tok::BracketOpen) {
+            size_t i = index_ + 1;
+            int depth = 0;
+            while (i < tokens_.size()) {
+                if (tokens_[i].kind == Tok::BracketOpen) ++depth;
+                else if (tokens_[i].kind == Tok::BracketClose) { if (--depth == 0) { ++i; break; } }
+                ++i;
+            }
+            while (i < tokens_.size() && tokens_[i].kind == Tok::BracketOpen) {
+                depth = 0;
+                while (i < tokens_.size()) {
+                    if (tokens_[i].kind == Tok::BracketOpen) ++depth;
+                    else if (tokens_[i].kind == Tok::BracketClose) { if (--depth == 0) { ++i; break; } }
+                    ++i;
+                }
+            }
+            next = i < tokens_.size() ? tokens_[i].kind : Tok::EndOfInput;
+            if (next == Tok::Assign || next == Tok::PlusAssign || next == Tok::MinusAssign ||
+                (next == Tok::Operator && tokens_[i].text == "=")) {
+                return parseAssignment();
+            }
+            next = peek(1).kind;
+        }
+        if (next == Tok::Assign || next == Tok::PlusAssign || next == Tok::MinusAssign ||
+            (next == Tok::Operator && peek(1).text == "=")) {
+            return parseAssignment();
+        }
+        // A call written where a statement belongs, its outputs discarded.
+        if (next == Tok::ParensOpen) {
+            const int line = current().line;
+            ExprPtr call = parsePrimary();
+            if (failed_) return nullptr;
+            return StmtPtr(new CallStmt(std::move(call), line));
+        }
+    }
+    failUnexpected();
+    return nullptr;
+}
+
+// 'int' opens a term when it is 'int(x)' and does not when it is 'int k : 5'.
+// One token of lookahead separates them.
+bool Parser::atDeclaration() const {
+    if (!at(Tok::Int) && !at(Tok::Real) && !at(Tok::Char)) return false;
+    return peek(1).kind != Tok::ParensOpen;
+}
+
+const Type *Parser::scalarTypeHere() {
+    if (match(Tok::Int))  return Type::intType();
+    if (match(Tok::Real)) return Type::realType();
+    if (match(Tok::Char)) return Type::charType();
+    return nullptr;
+}
+
+StmtPtr Parser::parseDeclaration() {
+    const int line = current().line;
+    const Type *type = scalarTypeHere();
+
+    if (!at(Tok::Identifier)) { failUnexpected(); return nullptr; }
+    const std::string name = advance().text;
+
+    std::vector<ExprPtr> extents;
+    while (at(Tok::BracketOpen)) {
+        advance();
+        ExprPtr extent = parseExpression();
+        if (failed_) return nullptr;
+        if (!expect(Tok::BracketClose, unexpected())) return nullptr;
+        extents.push_back(std::move(extent));
+    }
+
+    ExprPtr initial;
+    if (match(Tok::Assign)) {
+        initial = parseInitializer();
+        if (failed_) return nullptr;
+    }
+    std::unique_ptr<Declare> node(new Declare(type, name, std::move(initial), line));
+    for (ExprPtr &extent : extents) node->addExtent(std::move(extent));
+    return StmtPtr(node.release());
+}
+
+// 'x : e', and the three spellings that mean the same thing. '=' is accepted
+// silently in this position; '+:' and '-:' are expanded here into 'x : x + e'
+// and 'x : x - e', so that nothing downstream has to know they existed.
+StmtPtr Parser::parseAssignment() {
+    const int line = current().line;
+    const std::string name = advance().text;
+
+    // The target may be an element: 'A[i][j] : v'.
+    ExprPtr target(new Var(name));
+    while (at(Tok::BracketOpen)) {
+        advance();
+        ExprPtr index = parseExpression();
+        if (failed_) return nullptr;
+        if (!expect(Tok::BracketClose, unexpected())) return nullptr;
+        target.reset(new Index(std::move(target), std::move(index)));
+    }
+
+    const Tok how = advance().kind;
+    ExprPtr value = parseInitializer();
+    if (failed_) return nullptr;
+
+    if (how == Tok::PlusAssign || how == Tok::MinusAssign) {
+        return StmtPtr(new CompoundAssign(std::move(target), how == Tok::PlusAssign,
+                                          std::move(value), line));
+    }
+    return StmtPtr(new Assign(std::move(target), std::move(value), line));
+}
+
+// An initializer is an array literal or an ordinary expression.
+ExprPtr Parser::parseInitializer() {
+    if (at(Tok::BraceOpen)) return parseArrayLiteral();
+    return parseExpression();
+}
+
+// '{ Slot { "," Slot } }', where a slot may be empty. A trailing comma is a
+// slot too, not an error: that follows from counting slots by commas and
+// cannot be special-cased away without also breaking '{1.0,,}', which needs
+// its trailing gap to mean a third entry.
+ExprPtr Parser::parseArrayLiteral() {
+    advance();                                     // '{'
+    std::unique_ptr<ArrayLit> node(new ArrayLit());
+    if (match(Tok::BraceClose)) return ExprPtr(node.release());
+
+    while (true) {
+        if (at(Tok::Comma) || at(Tok::BraceClose)) {
+            node->add(ExprPtr(new Blank()));
+        } else {
+            ExprPtr slot = parseInitializer();
+            if (failed_) return nullptr;
+            node->add(std::move(slot));
+        }
+        if (match(Tok::Comma)) continue;
+        break;
+    }
+    if (!expect(Tok::BraceClose, unexpected())) return nullptr;
+    return ExprPtr(node.release());
+}
+
+// 'return', 'return e', or 'return (e, e, ...)' - the parentheses are
+// required for two or more, which is what tells the list from a single
+// parenthesised expression.
+StmtPtr Parser::parseReturn() {
+    const int line = current().line;
+    advance();
+
+    std::unique_ptr<Return> node(new Return(line));
+    if (!startsTerm() || startsLine(index_) || looksLikeNewStatement(index_)) {
+        return StmtPtr(node.release());
+    }
+
+    if (at(Tok::ParensOpen) && parenGroupHasTopLevelComma(index_)) {
+        advance();
+        while (true) {
+            ExprPtr value = parseExpression();
+            if (failed_) return nullptr;
+            node->add(std::move(value));
+            if (!match(Tok::Comma)) break;
+        }
+        if (!expect(Tok::ParensClose, unexpected())) return nullptr;
+        return StmtPtr(node.release());
+    }
+
+    ExprPtr value = parseExpression();
+    if (failed_) return nullptr;
+    node->add(std::move(value));
+    return StmtPtr(node.release());
+}
+
+// Whether the parenthesised group starting here holds a comma at its top
+// level, which is what separates 'return (a, b)' from 'return (a + b)'.
+bool Parser::parenGroupHasTopLevelComma(size_t start) const {
+    int depth = 0;
+    for (size_t i = start; i < tokens_.size(); ++i) {
+        switch (tokens_[i].kind) {
+        case Tok::ParensOpen:
+        case Tok::BracketOpen:
+            ++depth;
+            break;
+        case Tok::ParensClose:
+        case Tok::BracketClose:
+            if (--depth == 0) return false;
+            break;
+        case Tok::Comma:
+            if (depth == 1) return true;
+            break;
+        default:
+            break;
+        }
+    }
+    return false;
+}
+
+// '<a,b> : f(...)'. The '<' is overloaded three ways, so wherever one could
+// start a statement the parser peeks for the exact shape before committing.
+bool Parser::looksLikeMultiAssignHeader(size_t start) const {
+    size_t i = start + 1;
+    if (i >= tokens_.size() || tokens_[i].kind != Tok::Identifier) return false;
+    ++i;
+    while (i < tokens_.size() && tokens_[i].kind == Tok::Comma) {
+        ++i;
+        if (i >= tokens_.size() || tokens_[i].kind != Tok::Identifier) return false;
+        ++i;
+    }
+    if (i >= tokens_.size()) return false;
+    const bool closes = tokens_[i].kind == Tok::Operator && tokens_[i].text == ">";
+    if (!closes) return false;
+    ++i;
+    return i < tokens_.size() && tokens_[i].kind == Tok::Assign;
+}
+
+StmtPtr Parser::parseMultiAssign() {
+    const int line = current().line;
+    advance();                                     // '<'
+
+    std::unique_ptr<MultiAssign> node(new MultiAssign(line));
+    node->addTarget(advance().text);
+    while (match(Tok::Comma)) node->addTarget(advance().text);
+    advance();                                     // '>'
+    advance();                                     // ':'
+
+    if (!at(Tok::Identifier) || peek(1).kind != Tok::ParensOpen) {
+        failUnexpected();
+        return nullptr;
+    }
+    ExprPtr call = parsePrimary();
+    if (failed_) return nullptr;
+    node->setCall(std::move(call));
+    return StmtPtr(node.release());
+}
+
+StmtPtr Parser::parseIf() {
+    const int line = current().line;
+    advance();
+
+    std::unique_ptr<If> node(new If(line));
+    ExprPtr condition = parseExpression();
+    if (failed_) return nullptr;
+    Block body = parseBlock();
+    if (failed_) return nullptr;
+    node->addBranch(std::move(condition), std::move(body));
+
+    while (at(Tok::ElseIf)) {
+        advance();
+        ExprPtr next = parseExpression();
+        if (failed_) return nullptr;
+        Block branch = parseBlock();
+        if (failed_) return nullptr;
+        node->addBranch(std::move(next), std::move(branch));
+    }
+    if (match(Tok::Else)) {
+        Block otherwise = parseBlock();
+        if (failed_) return nullptr;
+        node->setElse(std::move(otherwise));
+    }
+    return StmtPtr(node.release());
+}
+
+StmtPtr Parser::parseWhile() {
+    const int line = current().line;
+    advance();
+    ExprPtr condition = parseExpression();
+    if (failed_) return nullptr;
+    ++loopDepth_;
+    Block body = parseBlock();
+    --loopDepth_;
+    if (failed_) return nullptr;
+    return StmtPtr(new While(std::move(condition), std::move(body), line));
+}
+
+// Two written forms:
+//
+//     for i : start to end [step s]     inclusive of end
+//     for i < n [step s]                0 to n - 1
+//
+// The second is sugar for the first and is expanded here, which is why 'step'
+// rides along unchanged and why nothing downstream knows the difference. The
+// '<' needs no lookahead to disambiguate: a '<' in that position was a parse
+// error in every earlier version of the language, so nothing legal changed
+// meaning when it was given one.
+StmtPtr Parser::parseFor() {
+    const int line = current().line;
+    advance();
+
+    if (!at(Tok::Identifier)) { failUnexpected(); return nullptr; }
+    const std::string name = advance().text;
+
+    ExprPtr start;
+    ExprPtr end;
+    if (atOperator("<")) {
+        advance();
+        ExprPtr count = parseExpression();
+        if (failed_) return nullptr;
+        start.reset(new IntLit(0));
+        end.reset(new Binary(Binary::Op::Subtract, std::move(count), ExprPtr(new IntLit(1))));
+    } else {
+        if (!expect(Tok::Assign, unexpected())) return nullptr;
+        start = parseExpression();
+        if (failed_) return nullptr;
+        if (!expect(Tok::To, unexpected())) return nullptr;
+        end = parseExpression();
+        if (failed_) return nullptr;
+    }
+
+    ExprPtr step;
+    if (match(Tok::Step)) {
+        step = parseExpression();
+        if (failed_) return nullptr;
+    }
+
+    ++loopDepth_;
+    Block body = parseBlock();
+    --loopDepth_;
+    if (failed_) return nullptr;
+
+    return StmtPtr(new For(name, std::move(start), std::move(end),
+                           std::move(step), std::move(body), line));
+}
+
+// A print command must be the first token on its line. The rule's real
+// purpose is at most one print command per line, since a second one
+// necessarily has the first's items before it.
+StmtPtr Parser::parsePrint() {
+    if (!startsLine(index_)) {
+        fail(std::string(at(Tok::PrintLine) ? "'?'" : "'?\?'") + " must start its line");
+        return nullptr;
+    }
+    const bool newline = at(Tok::PrintLine);
+    const int line = current().line;
+    advance();
+
+    std::unique_ptr<Print> node(new Print(newline, line));
+    while (startsTerm() && !startsLine(index_) && !looksLikeNewStatement(index_)) {
+        ExprPtr item;
+        if (atPrecisionDirective()) {
+            advance();                             // 'prec'
+            advance();                             // '('
+            ExprPtr places = parseExpression();
+            if (failed_) return nullptr;
+            if (!expect(Tok::ParensClose, unexpected())) return nullptr;
+            item.reset(new Precision(std::move(places)));
+        } else {
+            item = parseExpression();
+        }
+        if (failed_) return nullptr;
+        node->add(std::move(item));
+    }
+    return StmtPtr(node.release());
+}
+
+// Where a print item list stops. This is load-bearing rather than a
+// convenience: a token missing from it does not produce an error, it silently
+// ends the list. Anything added to the expression grammar as a prefix has to
+// be added here too.
+bool Parser::startsTerm() const {
+    switch (current().kind) {
+    case Tok::IntLiteral:
+    case Tok::RealLiteral:
+    case Tok::StringLiteral:
+    case Tok::Identifier:
+    case Tok::ParensOpen:
+        return true;
+    case Tok::Operator:
+        // Unary minus, and nothing else in the operator class: a term cannot
+        // begin with '*'.
+        return current().text == "-";
+    case Tok::Int:
+    case Tok::Real:
+    case Tok::Char:
+        // 'int' opens a term when it is 'int(x)' and does not when it is
+        // 'int k : 5'. This is why the question takes a position rather than
+        // a token kind.
+        return peek(1).kind == Tok::ParensOpen;
+    default:
+        return false;
+    }
+}
+
+bool Parser::looksLikeNewStatement(size_t at) const {
+    if (at + 1 >= tokens_.size()) return false;
+    if (tokens_[at].kind != Tok::Identifier) return false;
+    const Token &next = tokens_[at + 1];
+    switch (next.kind) {
+    case Tok::Assign:
+    case Tok::PlusAssign:
+    case Tok::MinusAssign:
+        return true;
+    case Tok::Operator:
+        return next.text == "=";
+    default:
+        return false;
+    }
+}
+
+ExprPtr Parser::parseExpression() {
+    return parseOr();
+}
+
+ExprPtr Parser::parseOr() {
+    ExprPtr left = parseAnd();
+    while (!failed_ && atOperator("|")) {
+        advance();
+        ExprPtr right = parseAnd();
+        if (failed_) return nullptr;
+        left.reset(new Binary(Binary::Op::Or, std::move(left), std::move(right)));
+    }
+    return left;
+}
+
+ExprPtr Parser::parseAnd() {
+    ExprPtr left = parseComparison();
+    while (!failed_ && atOperator("&")) {
+        advance();
+        ExprPtr right = parseComparison();
+        if (failed_) return nullptr;
+        left.reset(new Binary(Binary::Op::And, std::move(left), std::move(right)));
+    }
+    return left;
+}
+
+ExprPtr Parser::parseComparison() {
+    ExprPtr left = parseAdditive();
+    while (!failed_) {
+        Binary::Op op;
+        // A '<' that opens a multi-assign header is not a comparison, so it
+        // ends the expression rather than continuing it.
+        if (atOperator("<") && looksLikeMultiAssignHeader(index_)) break;
+        if      (atOperator("="))  op = Binary::Op::Equal;
+        else if (atOperator("!=")) op = Binary::Op::NotEqual;
+        else if (atOperator("<"))  op = Binary::Op::Less;
+        else if (atOperator(">"))  op = Binary::Op::Greater;
+        else if (atOperator("<=")) op = Binary::Op::LessEqual;
+        else if (atOperator(">=")) op = Binary::Op::GreaterEqual;
+        else break;
+        advance();
+        ExprPtr right = parseAdditive();
+        if (failed_) return nullptr;
+        left.reset(new Binary(op, std::move(left), std::move(right)));
+    }
+    return left;
+}
+
+ExprPtr Parser::parseAdditive() {
+    ExprPtr left = parseMultiplicative();
+    while (!failed_ && (atOperator("+") || atOperator("-"))) {
+        const Binary::Op op = atOperator("+") ? Binary::Op::Add : Binary::Op::Subtract;
+        advance();
+        ExprPtr right = parseMultiplicative();
+        if (failed_) return nullptr;
+        left.reset(new Binary(op, std::move(left), std::move(right)));
+    }
+    return left;
+}
+
+ExprPtr Parser::parseMultiplicative() {
+    ExprPtr left = parsePower();
+    while (!failed_) {
+        Binary::Op op;
+        if      (atOperator("*")) op = Binary::Op::Multiply;
+        else if (atOperator("/")) op = Binary::Op::Divide;
+        else if (atOperator("%")) op = Binary::Op::Modulus;
+        else break;
+        advance();
+        ExprPtr right = parsePower();
+        if (failed_) return nullptr;
+        left.reset(new Binary(op, std::move(left), std::move(right)));
+    }
+    return left;
+}
+
+// '^' is right-associative: '2^3^2' is 2^(3^2), which is 512 and not 64.
+ExprPtr Parser::parsePower() {
+    ExprPtr base = parsePrimary();
+    if (failed_ || !atOperator("^")) return base;
+    advance();
+    ExprPtr exponent = parsePower();
+    if (failed_) return nullptr;
+    return ExprPtr(new Binary(Binary::Op::Power, std::move(base), std::move(exponent)));
+}
+
+ExprPtr Parser::parsePrimary() {
+    // Unary minus folds the negation into its operand here and returns it as
+    // one finished term, before the caller can see a following '^'. That is
+    // why '-2^2' is '(-2)^2' and evaluates to 4, unlike ordinary maths
+    // notation. On the exponent side the recursion in parsePower() puts it
+    // back the usual way round, so '2^-2' is 2^(-2).
+    if (atOperator("-")) {
+        advance();
+        ExprPtr operand = parsePrimary();
+        if (failed_) return nullptr;
+        // A negated literal becomes the literal, so '-5' is one constant
+        // rather than a subtraction from zero. Anything else is the
+        // subtraction, which is all the language needs a unary minus to be.
+        if (operand->isIntLiteral()) {
+            const int32_t value = static_cast<const IntLit &>(*operand).value();
+            return ExprPtr(new IntLit(-value));
+        }
+        if (operand->isRealLiteral()) {
+            const double value = static_cast<const RealLit &>(*operand).value();
+            return ExprPtr(new RealLit(-value));
+        }
+        return ExprPtr(new Binary(Binary::Op::Subtract,
+                                  ExprPtr(new IntLit(0)), std::move(operand)));
+    }
+    if (at(Tok::IntLiteral)) {
+        const Token &t = advance();
+        return ExprPtr(new IntLit(t.intValue));
+    }
+    if (at(Tok::RealLiteral)) {
+        const Token &t = advance();
+        return ExprPtr(new RealLit(t.realValue));
+    }
+    if (at(Tok::StringLiteral)) {
+        const Token &t = advance();
+        return parsePostfix(ExprPtr(new StrLit(t.text)));
+    }
+    // int(x), real(x), char(x). These are keywords, so the parser has to read
+    // them here rather than leaving them to the identifier path - which is
+    // why they were implemented on both sides once and unreachable from
+    // either.
+    if ((at(Tok::Int) || at(Tok::Real) || at(Tok::Char)) && peek(1).kind == Tok::ParensOpen) {
+        const Type *target = scalarTypeHere();
+        advance();                                 // '('
+        ExprPtr inner = parseExpression();
+        if (failed_) return nullptr;
+        if (!expect(Tok::ParensClose, unexpected())) return nullptr;
+        return parsePostfix(ExprPtr(new Convert(std::move(inner), target)));
+    }
+    if (at(Tok::Identifier)) {
+        const Token &t = advance();
+        if (at(Tok::ParensOpen)) {
+            advance();
+            std::unique_ptr<Call> call(new Call(t.text, t.line));
+            while (!at(Tok::ParensClose)) {
+                ExprPtr argument = parseExpression();
+                if (failed_) return nullptr;
+                call->add(std::move(argument));
+                if (!match(Tok::Comma)) break;
+            }
+            if (!expect(Tok::ParensClose, unexpected())) return nullptr;
+            return parsePostfix(ExprPtr(call.release()));
+        }
+        return parsePostfix(ExprPtr(new Var(t.text)));
+    }
+    if (at(Tok::ParensOpen)) {
+        advance();
+        ExprPtr inner = parseExpression();
+        if (failed_) return nullptr;
+        if (!expect(Tok::ParensClose, unexpected())) return nullptr;
+        return parsePostfix(std::move(inner));
+    }
+    failUnexpected();
+    return nullptr;
+}
+
+// Indexing and the dimension attributes share one loop, so they chain in any
+// order: 'M[k].row', 'A.dim(i)'.
+ExprPtr Parser::parsePostfix(ExprPtr base) {
+    while (!failed_) {
+        if (at(Tok::BracketOpen)) {
+            advance();
+            ExprPtr index = parseExpression();
+            if (failed_) return nullptr;
+            if (!expect(Tok::BracketClose, unexpected())) return nullptr;
+            base.reset(new Index(std::move(base), std::move(index)));
+            continue;
+        }
+        if (at(Tok::Dot)) {
+            advance();
+            if (!at(Tok::Identifier)) { failUnexpected(); return nullptr; }
+            const std::string what = advance().text;
+            if (what == "row") {
+                base.reset(new Dim(std::move(base), ExprPtr(new IntLit(0)), what));
+            } else if (what == "col") {
+                base.reset(new Dim(std::move(base), ExprPtr(new IntLit(1)), what));
+            } else if (what == "dim") {
+                if (!at(Tok::ParensOpen)) {
+                    fail("'.dim' needs an axis, as .dim(0)");
+                    return nullptr;
+                }
+                advance();
+                ExprPtr axis = parseExpression();
+                if (failed_) return nullptr;
+                if (!expect(Tok::ParensClose, unexpected())) return nullptr;
+                base.reset(new Dim(std::move(base), std::move(axis), what));
+            } else {
+                fail("No '." + what + "' - use .row, .col or .dim(n)");
+                return nullptr;
+            }
+            // An attribute is read-only; a following assignment says the
+            // programmer thought otherwise.
+            if (at(Tok::Assign) || at(Tok::PlusAssign) || at(Tok::MinusAssign)) {
+                fail("'." + what + "' is read-only");
+                return nullptr;
+            }
+            continue;
+        }
+        break;
+    }
+    return base;
+}
+
+bool Parser::atPrecisionDirective() const {
+    return at(Tok::Identifier) && current().text == "prec" && peek(1).kind == Tok::ParensOpen;
+}
+
+}  // namespace shalimar
