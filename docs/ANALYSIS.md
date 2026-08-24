@@ -334,6 +334,14 @@ compile and run, and `Compiler-S/examples/*.shm` carry their expected output inl
 
 ## 10. Proposed architecture
 
+> **Note added 2026-08-25, after the code existed.** This section is a proposal
+> and two parts of it were not taken. The preprocessor and the C lexer are this
+> converter's own — `c/CPreScan` and `c/CLexer` — rather than Compiler-C's, and
+> `c2s::Normalise` **was never built**: `CToS` walks the C tree once and lowers
+> as it goes. `CLAUDE.md` describes the tree as it stands. What follows is what
+> was proposed before there was one, kept because the argument for a separate
+> pass is still the best statement of why one might be worth having.
+
 Given §2, the shape falls out:
 
 ```
@@ -420,7 +428,7 @@ versa) fails the suite.
 | 2 | Shalimar → C89 end to end for scalar arithmetic, `if`, `while`, `for`, calls, `?` |
 | 3 | Shalimar → C89 for arrays and `char[]`, per Decision 6 |
 | 4 | `c2s::CParser` (or the chosen alternative from Decision 1) |
-| 5 | `Normalise` — declaration hoisting, α-renaming, `switch`, `do-while`, ternary, compound assignment |
+| 5 | `Normalise` — declaration hoisting, α-renaming, `switch`, `do-while`, ternary, compound assignment *(delivered, but not as a pass: these lowerings live inside `CToS` — see the note on §10)* |
 | 6 | C89 → Shalimar end to end, with the full §6.3 error catalogue and locations |
 | 7 | Differential test suite: compile-run-diff both directions on every example |
 

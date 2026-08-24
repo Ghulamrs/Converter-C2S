@@ -48,26 +48,35 @@ Two consequences of not linking, both deliberate:
 - `Compiler-C`'s AST is a code-generation tree — declarations are erased,
   `a[i]` is already `*(a + i*8)`, `enum` and `sizeof` are folded away. This
   converter's `CAst` is **source-faithful** on purpose. Do not lower anything
-  in the parser; lowering is `convert/Normalise`'s job and is a separate pass
-  precisely so it can be read as C before it is read as Shalimar.
+  in the parser: what the parser builds is what the author wrote, so a
+  diagnostic can quote it and `--canon` can print it back. Lowering belongs
+  to `convert/`, and nowhere earlier.
 
 ## Architecture
 
 ```
 a.c   -> c/CPreScan -> c/CLexer -> c/CParser -> CAst
                                                  |
-                                    convert/Normalise (CAst -> CAst)
-                                                 |
-                                            convert/CToS -> SAst -> s/SPrinter -> a.shm
+                                    convert/CToS -> SAst -> s/SPrinter -> a.shm
 
-b.shm -> s/SLexer -> s/SParser -> SAst -> convert/SToC -> CAst -> c/CPrinter -> b.c
+b.shm -> s/SFrontEnd -> SAst -> convert/SToC -> CAst -> c/CPrinter -> b.c
+         (s/vendor: Lexer, Parser, Check)
 ```
 
-**There is no third IR.** `CAst` and `SAst` are the two, and what a bridge IR
-would have bought — writing each lowering once — is bought by `Normalise`
-instead, which rewrites `CAst` into the C89 subset that maps one-to-one onto
-Shalimar. Every lowering is therefore a `CAst -> CAst` pass that can be tested
-on its own and printed back out as C to be read.
+**There is no third IR.** `CAst` and `SAst` are the two, and there is no pass
+between them either: `CToS` and `SToC` each walk their input tree once and
+build the other, lowering as they go. `lowerSwitch`, `lowerCountingFor`,
+`lowerPrintf`, `hoistDeclarations` and `rename` are members of `CToS`, and a
+`do-while` is peeled straight into Shalimar blocks — none of them is a
+`CAst -> CAst` rewrite, and there is no intermediate C form to print.
+
+`docs/ANALYSIS.md` §10 proposed one, under the name `Normalise`, and §12
+milestone 5 scheduled it. **It was never built, and nothing is called that.**
+The argument for it still stands and is worth reading before the file grows
+much further — a separate pass could be tested on its own, and printed back
+out as C to be read, neither of which is true of a lowering buried in a
+1,500-line visitor. Treat it as an open design question rather than as a
+description of this tree.
 
 ## Two Shalimar layout rules the printer must not break
 

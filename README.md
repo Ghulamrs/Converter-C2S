@@ -67,7 +67,7 @@ src/            the converter
   Options       the command line
   c/            the C89 front end: lexer, AST, parser, printer
   s/            the Shalimar front end: lexer, AST, parser, printer
-  convert/      the lowering passes and the two mappings
+  convert/      the two mappings, each lowering as it walks
 tests/          the differential suite
 docs/           ANALYSIS.md - why this is built the way it is
 ```
