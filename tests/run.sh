@@ -9,7 +9,10 @@
 #   tests/cases/s2c/*.shm    Shalimar -> C89, byte-identical output
 #   tests/cases/c2s/*.c      C89 -> Shalimar, identical after stripping the
 #                            trailing space Shalimar's '?' always writes
-#   tests/cases/beyond/*.c   must convert with markers and exit 1
+#   tests/cases/beyond/*.c   valid C89 that cc1 accepts, refused with
+#                            markers and exit 1; every refusal counted
+#                            must also be one shown, and any patterns in
+#                            the case's .expect file must be among them
 #   tests/cases/defines/*.c  must stop with the preprocessor decision list
 
 set -u
@@ -50,10 +53,52 @@ done
 
 for f in "$here"/cases/beyond/*.c; do
     n=$(basename "$f" .c)
+
+    # A rejection case has to be valid C89 first, or what it proves is that
+    # the C parser choked - not that the mapping refused. cc1 is the
+    # authority on that, and -c because a case is not required to link.
+    "$CC1" -c "$f" -o "$out/b_$n.o" 2>"$out/e" ||
+        { fails "$n: cc1 refused the case itself: $(head -2 "$out/e")"; continue; }
+
     "$c2s" "$f" -o "$out/conv_$n.shm" 2>"$out/e"
     rc=$?
     if [ $rc -ne 1 ]; then fails "$n: expected exit 1 with markers, got $rc"; continue; fi
     if ! grep -q 'BEYOND SHALIMAR' "$out/conv_$n.shm"; then fails "$n: no markers in the output"; continue; fi
+
+    # Every refusal counted must be a refusal shown. Three separate faults
+    # have hidden in that gap - a printer that did not recognise the marker
+    # node, a marker built with no block to go in, and a marker dropped on
+    # the way out of the globals holder - and each one left behind a
+    # smaller program that compiled and ran. The count is on stderr, the
+    # markers are in the file, and they have to agree.
+    printed=$(grep -c 'BEYOND SHALIMAR' "$out/conv_$n.shm")
+    counted=$(sed -n 's/.*: \([0-9][0-9]*\) constructs* ha[sv]e* no expression.*/\1/p' \
+              "$out/e" | head -1)
+    if [ -z "$counted" ]; then fails "$n: the run did not say how many it refused"; continue; fi
+    if [ "$printed" != "$counted" ]; then
+        fails "$n: $counted refused, $printed marked - a refusal went missing"
+        continue
+    fi
+
+    # Named refusals, where the case says which ones it is for. One grep
+    # pattern per line - a basic regular expression, so a '*' in a C type
+    # needs its backslash - and a case with no .expect asserts only the
+    # above. Every miss is listed, not just the last one found.
+    if [ -f "$here/cases/beyond/$n.expect" ]; then
+        missing=0
+        while IFS= read -r want; do
+            [ -z "$want" ] && continue
+            if ! grep -q "$want" "$out/conv_$n.shm"; then
+                echo "    $n: nothing refused for: $want"
+                missing=$((missing+1))
+            fi
+        done < "$here/cases/beyond/$n.expect"
+        if [ "$missing" -ne 0 ]; then
+            fails "$n: $missing expected refusal(s) missing"
+            continue
+        fi
+    fi
+
     pass=$((pass+1))
 done
 

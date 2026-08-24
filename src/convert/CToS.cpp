@@ -1221,6 +1221,7 @@ void CToS::declareLocal(CDeclaration &decl, bool atTop) {
     // the function) and registers the renamed name in the CURRENT scope
     // regime - the hoist walks in source order, so the scope stack is not
     // available; names are registered flat and collisions renamed.
+
     std::vector<CDeclaration::Declarator> &declarators = decl.declarators();
     for (std::size_t i = 0; i < declarators.size(); ++i) {
         CDeclaration::Declarator &declarator = declarators[i];
@@ -1339,7 +1340,29 @@ void CToS::hoistDeclarations(CStmt &node, shalimar::Block *top) {
     if (CDeclStmt *decl = dynamic_cast<CDeclStmt *>(&node)) {
         shalimar::Block *saved = block_;
         block_ = top;
-        declareLocal(decl->decl(), true);
+        // A local 'static' outlives the call and is initialised once.
+        // Hoisted like any other local it becomes a plain variable that is
+        // initialised again on every call - which compiles, runs, and
+        // quietly means something else. Shalimar has no per-function
+        // persistence to put it in, so it is refused here, where a
+        // declaration is a local by construction.
+        //
+        // 'register' and 'auto' pass through: in C89 they are hints with no
+        // effect on meaning. A file-scope 'static' passes through too, in
+        // convertTopDeclaration - it says 'not visible to other translation
+        // units', and a Shalimar program is whole, so there are none.
+        if (decl->decl().storage() == CDeclaration::Storage::Static) {
+            std::vector<CDeclaration::Declarator> &statics =
+                decl->decl().declarators();
+            for (std::size_t i = 0; i < statics.size(); ++i) {
+                markBeyond(statics[i].offset,
+                           "'" + statics[i].name + "' declared static inside "
+                           "a function - it would keep its value between "
+                           "calls, and Shalimar has nowhere to keep it");
+            }
+        } else {
+            declareLocal(decl->decl(), true);
+        }
         block_ = saved;
         return;
     }
@@ -1552,11 +1575,11 @@ void CToS::convertTopDeclaration(CDeclaration &decl) {
     declareLocal(decl, false);
     block_ = saved;
     for (std::size_t i = 0; i < holder.size(); ++i) {
-        if (dynamic_cast<shalimar::Declare *>(holder[i].get()) != nullptr) {
-            program_->addGlobal(std::move(holder[i]));
-        }
-        // A marker at global scope would land between functions; the count
-        // already carries it, and the reason was recorded.
+        // Declares and markers both, in the order they were made. A marker
+        // dropped here was the third way a refusal could vanish: the count
+        // still rose, so the run reported a construct it had nowhere shown,
+        // and the output was a smaller program that compiled.
+        program_->addGlobal(std::move(holder[i]));
     }
 }
 

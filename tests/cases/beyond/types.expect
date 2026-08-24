@@ -1,0 +1,7 @@
+a typedef - Shalimar has no named types
+struct point - Shalimar has no such type
+union value - Shalimar has no such type
+enum colour - Shalimar has no such type
+'u' - unsigned int has no Shalimar type
+'s' - short int has no Shalimar type
+'l' - long int has no Shalimar type

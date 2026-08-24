@@ -1,0 +1,6 @@
+'p' - int \* has no Shalimar type
+'text' - char \* has no Shalimar type
+'head' - struct node \* has no Shalimar type
+'&' - Shalimar has no pointers
+'\*' - Shalimar has no pointers
+'->value' - Shalimar has no structs

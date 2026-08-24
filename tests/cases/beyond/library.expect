@@ -1,0 +1,5 @@
+'strcpy' - not defined in this file
+'strcmp' - not defined in this file
+'toupper' - not defined in this file
+'scanf' - not defined in this file
+a cast to int \* - only int, real and char exist

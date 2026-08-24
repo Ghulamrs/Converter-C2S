@@ -1,0 +1,8 @@
+'&' - Shalimar has no bitwise operators
+'|' - Shalimar has no bitwise operators
+'\^' - Shalimar has no bitwise operators
+'~' - Shalimar has no bitwise operators
+'<<' - Shalimar has no bitwise operators
+'>>' - Shalimar has no bitwise operators
+'sizeof' - Shalimar has no size notion
+the ',' operator
