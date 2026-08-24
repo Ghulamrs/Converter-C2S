@@ -77,7 +77,15 @@ void CToS::markBeyond(std::size_t offset, const std::string &reason) {
     ++beyondCount_;
     shalimar::StmtPtr marker(new SBeyondStmt(reason, sourceLinesAt(offset),
                                              lineOf(offset)));
-    if (block_ != nullptr) block_->push_back(std::move(marker));
+    // A refusal outside any function body - a struct, a file-scope
+    // declaration - has to appear too, or the count says six and a reader
+    // looking for six finds five. Program keeps its top-level order, so the
+    // marker lands there and prints where the construct stood.
+    if (block_ != nullptr) {
+        block_->push_back(std::move(marker));
+    } else if (program_ != nullptr) {
+        program_->addGlobal(std::move(marker));
+    }
 }
 
 const shalimar::Type *CToS::scalarS(const CType &type, bool *lossy) const {

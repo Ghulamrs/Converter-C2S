@@ -4,6 +4,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
+
+#include "SBeyond.h"
 
 namespace c2s {
 
@@ -354,6 +357,23 @@ void SPrinter::visit(shalimar::Continue &) {
 // ------------------------------------------------------------------ program
 
 void SPrinter::statement(shalimar::Stmt &node) {
+    // SBeyondStmt is recognised here by type rather than dispatched to.
+    // Compiler-S's NodeVisitor is a closed list this converter must not
+    // edit, so the node's accept() is empty - which means that without this
+    // check it accepts into nothing and the refusal disappears, leaving a
+    // smaller program behind that compiles perfectly well. That is the one
+    // outcome a converter must never produce.
+    if (SBeyondStmt *marker = dynamic_cast<SBeyondStmt *>(&node)) {
+        // Shalimar has line comments and nothing else - a '/* */' block
+        // like the C side prints would lex as a divide and a multiply - so
+        // every line of the marker carries its own '//'.
+        line("// #BEYOND SHALIMAR: " + marker->reason());
+        const std::vector<std::string> &lines = marker->lines();
+        for (std::size_t i = 0; i < lines.size(); ++i) {
+            line("//    " + lines[i]);
+        }
+        return;
+    }
     node.accept(*this);
 }
 

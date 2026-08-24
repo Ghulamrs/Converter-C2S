@@ -62,7 +62,8 @@ private:
 class Options {
 public:
     Options() : direction_(Direction::Infer), emitIncludes_(true),
-                showHelp_(false), showVersion_(false), listCodes_(false) {}
+                canonicalise_(false), showHelp_(false), showVersion_(false),
+                listCodes_(false) {}
 
     // Reads argv. Anything wrong is a diagnostic rather than a throw or an
     // exit, so a caller can print the whole command line's worth of mistakes
@@ -79,6 +80,12 @@ public:
     // pow, <stdio.h> for printf - because otherwise it does not compile. The
     // rule about not converting headers is about the input side.
     bool emitIncludes() const { return emitIncludes_; }
+
+    // Parse the input with its own front end and print it straight back,
+    // converting nothing. The identity the differential suite is built on:
+    // it proves a front end and its printer against the real compiler
+    // without a mapping in the way to take the blame.
+    bool canonicalise() const { return canonicalise_; }
 
     bool showHelp() const { return showHelp_; }
     bool showVersion() const { return showVersion_; }
@@ -97,6 +104,7 @@ private:
     std::vector<std::string> includePath_;
     Permissions permissions_;
     bool emitIncludes_;
+    bool canonicalise_;
     bool showHelp_;
     bool showVersion_;
     bool listCodes_;
