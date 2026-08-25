@@ -5,5 +5,6 @@ c2s.exe
 *.dSYM/
 .DS_Store
 tests/out/
-.c2s-deploy.tgz
-_to_delete/
+rstudio/c2sr/src/core/
+rstudio/c2sr/src/*.o
+rstudio/c2sr/src/*.so

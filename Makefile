@@ -34,7 +34,7 @@ DEPS := $(OBJS:.o=.d)
 CC1 ?= ../Compiler-C/cc1.exe
 SHC ?= ../Compiler-S/shc.exe
 
-.PHONY: all clean test help
+.PHONY: all clean test help rpkg
 
 all: $(TARGET)
 
@@ -48,13 +48,35 @@ $(OBJDIR)/%.o: src/%.cpp
 test: $(TARGET)
 	CC1=$(CC1) SHC=$(SHC) ./tests/run.sh
 
+# Assemble the RStudio package: the engine sources are copied under the
+# package's src/core/ (main.cpp excluded - R owns the entry point), so
+# R CMD INSTALL rstudio/c2sr builds the whole converter for R.
+#
+# rstudio/c2sr/src/Makevars names this target and will not build without it,
+# so the two have to stay together. They did not: the target was written,
+# the Makevars note pointing at it was committed, and the target itself
+# never was - it survived only in a deploy archive, which is where this copy
+# came back from.
+rpkg:
+	rm -rf rstudio/c2sr/src/core
+	mkdir -p rstudio/c2sr/src/core/c rstudio/c2sr/src/core/s/vendor \
+	         rstudio/c2sr/src/core/convert
+	cp src/*.h rstudio/c2sr/src/core/
+	cp $(filter-out src/main.cpp,$(wildcard src/*.cpp)) rstudio/c2sr/src/core/
+	cp src/c/*.h src/c/*.cpp rstudio/c2sr/src/core/c/
+	cp src/s/*.h src/s/*.cpp rstudio/c2sr/src/core/s/
+	cp src/s/vendor/*.h src/s/vendor/*.cpp rstudio/c2sr/src/core/s/vendor/
+	cp src/convert/*.h src/convert/*.cpp rstudio/c2sr/src/core/convert/
+	@echo "rstudio/c2sr is ready: R CMD INSTALL rstudio/c2sr"
+
 clean:
-	rm -rf $(OBJDIR) $(TARGET)
+	rm -rf $(OBJDIR) $(TARGET) rstudio/c2sr/src/core
 
 help:
 	@echo "make          build $(TARGET)"
 	@echo "make test     build, then run the differential suite"
-	@echo "make clean    remove $(OBJDIR) and the binary"
+	@echo "make rpkg     copy the engine into rstudio/c2sr for R CMD INSTALL"
+	@echo "make clean    remove $(OBJDIR), the binary and the copied engine"
 	@echo ""
 	@echo "CC1=$(CC1)"
 	@echo "SHC=$(SHC)"
