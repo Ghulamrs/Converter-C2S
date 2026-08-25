@@ -1,0 +1,26 @@
+// Assigning one whole array to another, and text as a value.
+//
+// Shalimar's arrays carry their own extents and its char[] is text, so
+// 'label : "abc"' and 'copy : row' are single statements that mean
+// something. C89 has neither: an array is not assignable, and a string
+// is a pointer to bytes ending in a NUL that Shalimar's text does not
+// have. Both are refused rather than turned into a memcpy that would
+// need a length the C side cannot see.
+//
+// Two refusals in one file on purpose - the counted-equals-shown check
+// is only worth much when the count is above one.
+fun <> = main() {
+  char label[4]
+  int row[3]
+  int copy[3]
+
+  row[0] : 1
+  row[1] : 2
+  row[2] : 3
+
+  label : "abc"
+  copy : row
+
+  ? row[0] copy[0]
+  return
+}

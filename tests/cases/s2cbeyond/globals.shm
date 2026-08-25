@@ -1,0 +1,26 @@
+// A file-scope declaration the C89 side cannot carry.
+//
+// This is the case that was missing. SToC counted this refusal and then
+// dropped the marker on the way out of the globals holder, so the run
+// announced "1 construct has no expression in the target language, and
+// each is marked where it stands in the output" over a C file with no
+// marker in it at all. A reader told to find one found none, and what
+// was left was a program missing a declaration with nothing to say
+// where it had been.
+//
+// The same fault had been found twice on the C-to-Shalimar side and
+// fixed there both times; nothing on this side could see it, because
+// every counted-equals-shown check in this suite was made of C input.
+//
+// Shalimar sizes an array at run time, so 'int grid[size]' is ordinary
+// here and shc compiles and runs it. C89 sizes arrays when it compiles,
+// so there is nowhere for that to go - which makes this a refusal that
+// is genuinely about the mapping rather than about the front end.
+int size : 3
+int grid[size]
+
+fun <> = main() {
+  grid[0] : 7
+  ? grid[0]
+  return
+}

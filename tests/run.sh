@@ -20,6 +20,13 @@
 #                            markers and exit 1; every refusal counted
 #                            must also be one shown, and any patterns in
 #                            the case's .expect file must be among them
+#   tests/cases/s2cbeyond/*.shm  valid Shalimar that shc accepts, refused by
+#                            the other direction with markers and exit 1 -
+#                            the mirror of beyond/, and the same
+#                            counted-equals-shown check. It exists because
+#                            that check had only ever been made of C inputs,
+#                            and the Shalimar-to-C side had the identical
+#                            fault sitting in it unfound.
 #   tests/cases/defines/*.c  must stop with the preprocessor decision list
 #   the command line          exit statuses and codes, which no case above
 #                            reaches - every one of them hands c2s a good
@@ -159,6 +166,59 @@ for f in "$here"/cases/beyond/*.c; do
                 missing=$((missing+1))
             fi
         done < "$here/cases/beyond/$n.expect"
+        if [ "$missing" -ne 0 ]; then
+            fails "$n: $missing expected refusal(s) missing"
+            continue
+        fi
+    fi
+
+    pass=$((pass+1))
+done
+
+# Refusals in the other direction. The same three questions beyond/ asks -
+# exit 1, markers present, and every refusal counted also shown - asked of
+# Shalimar input, which nothing asked before.
+#
+# That gap was not theoretical. SToC counted a file-scope refusal and then
+# dropped the marker on the way out of the globals holder, so a run said "1
+# construct has no expression in the target language, and each is marked
+# where it stands in the output" over a file with no marker in it. The
+# C-to-Shalimar side had the same fault twice before and grew a check; this
+# side had no case that could have seen it.
+for f in "$here"/cases/s2cbeyond/*.shm; do
+    [ -e "$f" ] || continue
+    n=$(basename "$f" .shm)
+
+    # Valid Shalimar first, or what the case proves is that the front end
+    # choked rather than that the mapping refused. shc is the authority.
+    "$SHC" "$f" -o "$out/sb_$n" 2>"$out/e" ||
+        { fails "$n: shc refused the case itself: $(head -2 "$out/e")"; continue; }
+
+    flags=$(flagsfor "$here/cases/s2cbeyond/$n.flags")
+    # shellcheck disable=SC2086
+    "$c2s" "$f" -o "$out/conv_$n.c" $flags 2>"$out/e"
+    rc=$?
+    if [ $rc -ne 1 ]; then fails "$n: expected exit 1 with markers, got $rc"; continue; fi
+    if ! grep -q 'BEYOND SHALIMAR' "$out/conv_$n.c"; then fails "$n: no markers in the output"; continue; fi
+
+    printed=$(grep -c 'BEYOND SHALIMAR' "$out/conv_$n.c")
+    counted=$(sed -n 's/.*: \([0-9][0-9]*\) constructs* ha[sv]e* no expression.*/\1/p' \
+              "$out/e" | head -1)
+    if [ -z "$counted" ]; then fails "$n: the run did not say how many it refused"; continue; fi
+    if [ "$printed" != "$counted" ]; then
+        fails "$n: $counted refused, $printed marked - a refusal went missing"
+        continue
+    fi
+
+    if [ -f "$here/cases/s2cbeyond/$n.expect" ]; then
+        missing=0
+        while IFS= read -r want; do
+            [ -z "$want" ] && continue
+            if ! grep -q "$want" "$out/conv_$n.c"; then
+                echo "    $n: nothing refused for: $want"
+                missing=$((missing+1))
+            fi
+        done < "$here/cases/s2cbeyond/$n.expect"
         if [ "$missing" -ne 0 ]; then
             fails "$n: $missing expected refusal(s) missing"
             continue
