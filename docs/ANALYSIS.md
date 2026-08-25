@@ -352,9 +352,23 @@ naively, and each needs a policy (Decision 4):
 
 ---
 
-## 7. Shalimar → C89: the four hard parts
+## 7. Shalimar → C89: the five hard parts
 
 The grammar maps back easily; the semantics do not.
+
+0. **Shalimar traps where C wraps, and the traps are reachable.** *(added
+   2026-08-25, open)* `shc` makes passing the int limit a runtime error —
+   `int overflow in '*' - use real` — and C89 wraps silently. `shc` folds
+   constants hard enough that the obvious cases are caught when it compiles,
+   so this looked theoretical; it is not. `a : 1` then `for i : 1 to 40 { a :
+   a * 3 }` compiles, stops under `shc` at `1162261467`, and runs to the end
+   in the converted C printing wrapped negatives. The faithful fix is to route
+   every int `+`, `-` and `*` through a helper that checks and stops, carrying
+   the line so the message can match — `c2s_mul_int(a, 3, 6)`. That is
+   correct and it costs this direction's whole readability claim, which is why
+   it is written down here rather than done. **Decide it before the next
+   release**; until then it is the one thing this converter is known to
+   translate into a different answer rather than refuse.
 
 1. **Arrays carry their extents; C arrays do not.** `.row`, `.col` and `.dim(n)` are
    runtime queries, extents may be runtime expressions (`real w[len(s)]` is legal —

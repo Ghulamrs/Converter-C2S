@@ -1943,6 +1943,16 @@ void CToS::visit(CReturn &node) {
             canLift_ = true;
             shalimar::ExprPtr value = expression(*node.value());
             flushLifted();
+            // The last of the char crossings. A function declared to answer
+            // with a char, handed an int - 'return 66', or 'return 'A''
+            // which is its code point by the time it gets here - emitted the
+            // bare number into a 'fun <char>', and shc refused the output
+            // while c2s had already exited 0. Every other store into a char
+            // wraps; this one had nothing to ask, because the C tree carries
+            // no types and a return cannot see its own function's.
+            if (currentReturnsChar_ && !isCharValued(*node.value())) {
+                value = charWrap(std::move(value));
+            }
             ret->add(std::move(value));
         }
     }
@@ -2528,6 +2538,7 @@ void CToS::hoistDeclarations(CStmt &node, shalimar::Block *top) {
 void CToS::convertFunction(CFunctionDef &fn) {
     const CType &type = fn.type();
     currentIsMain_ = fn.name() == "main";
+    currentReturnsChar_ = false;
 
     const Info *registered = lookup(fn.name());
     shalimar::Prototype proto(
@@ -2552,6 +2563,7 @@ void CToS::convertFunction(CFunctionDef &fn) {
             return;
         }
         proto.outputs.push_back(scalar);
+        currentReturnsChar_ = scalar->kind() == shalimar::Type::Kind::Char;
     }
 
     scopes_.push_back(std::map<std::string, Info>());
@@ -2639,6 +2651,7 @@ void CToS::convertFunction(CFunctionDef &fn) {
         new shalimar::Function(std::move(proto), std::move(body)));
     program_->add(std::move(made));
     currentIsMain_ = false;
+    currentReturnsChar_ = false;
     currentFn_ = nullptr;
 }
 

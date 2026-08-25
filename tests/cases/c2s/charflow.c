@@ -11,6 +11,20 @@
 
 #include <stdio.h>
 
+/* Added 2026-08-25: a function that ANSWERS with a char. Every other
+ * store into a char wraps; this one had nothing to ask, because the C
+ * tree carries no types and a return cannot see its own function's. It
+ * emitted the bare code point into a 'fun <char>' and shc refused the
+ * output while c2s had already exited 0.
+ */
+char grade(int n)
+{
+    if (n > 5) {
+        return 'A';
+    }
+    return 66;
+}
+
 int main(void)
 {
     char c;
@@ -37,5 +51,6 @@ int main(void)
     }
 
     printf("c %c d %c \n", c, d);
+    printf("graded %c %c \n", grade(9), grade(1));
     return 0;
 }

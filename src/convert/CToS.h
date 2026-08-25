@@ -239,6 +239,11 @@ private:
     shalimar::Block *block_ = nullptr;
     shalimar::ExprPtr expr_;
     bool currentIsMain_ = false;
+
+    // Whether the function being converted answers with a char. A return's
+    // value has to be wrapped to match, and only this says so - the C tree
+    // carries no types, so the return statement cannot work it out alone.
+    bool currentReturnsChar_ = false;
     CFunctionDef *currentFn_ = nullptr;   // for the whole-function scans
     int loopDepth_ = 0;
 
