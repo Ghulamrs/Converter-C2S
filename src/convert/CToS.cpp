@@ -798,9 +798,14 @@ void CToS::visit(CExprStmt &node) {
             // assignment they compute a value for.
             canLift_ = true;
             shalimar::ExprPtr value = expression(assign->value());
-            // A char literal stored into a char lands as char(n).
-            if (dynamic_cast<CCharLit *>(&assign->value()) != nullptr &&
-                isCharContext(assign->target())) {
+            // A literal stored into a char lands as char(n). Both spellings
+            // of one count: C writes the NUL that ends a string as 0 rather
+            // than as '\0', and an unwrapped 0 assigned into a char array
+            // reached shc as an int and was refused - so the converter had
+            // reported success and written a file that would not compile.
+            if (isCharContext(assign->target()) &&
+                (dynamic_cast<CCharLit *>(&assign->value()) != nullptr ||
+                 dynamic_cast<CIntLit *>(&assign->value()) != nullptr)) {
                 value = charWrap(std::move(value));
             }
             shalimar::ExprPtr target = expression(assign->target());
@@ -1844,20 +1849,31 @@ void CToS::lowerPrintf(CCall &call) {
     const std::string &text = format->text();
     std::size_t nextArg = 1;
 
-    // C evaluates every argument of a printf before any of it is written.
-    // Shalimar's '?' evaluates and writes one item at a time, so an argument
-    // that itself prints interleaves with the line it is an argument to -
-    // 'high 3 reach 3' rather than 'reach 3' and then 'high 3 1'. The same
-    // values in a different order, with nothing to say it happened.
+    // A printf with arguments becomes a Shalimar function that prints, and
+    // a call to it.
     //
-    // So an impure argument is evaluated into a temporary first and the '?'
-    // is handed the temporary, which restores C's order exactly: everything
-    // observable happens before the first item is written. The prints are
-    // built into a block of their own meanwhile, because the hoists must
-    // stand ahead of all of them and a multi-line format pushes its first
-    // '?' long before the last argument has been seen.
-    shalimar::Block prelude;
+    // The reason is C's evaluation order. C works out every argument of a
+    // printf before it writes any of them; Shalimar's '?' evaluates and
+    // writes one item at a time, so an argument that itself printed came
+    // out interleaved with the line it was an argument to - 'high 3 reach
+    // 3' rather than 'reach 3' and then 'high 3 1'. Same values, different
+    // output, nothing to say it happened.
+    //
+    // A call fixes that by construction rather than by patching it up:
+    // Shalimar evaluates a call's arguments before entering the function,
+    // which is exactly what C does at a printf. So the format's holes
+    // become the function's parameters, the '?' statements move inside it,
+    // and the call site carries the argument expressions.
+    //
+    // It reads better too. The format is written once, however many times
+    // that call sits in a loop, and the call site says what it is passing
+    // rather than spelling a print out again.
+    //
+    // A format with no holes needs none of this - there is nothing to
+    // evaluate and nothing to pass - so it stays an inline '?'.
     shalimar::Block prints;
+    std::vector<shalimar::Param> params;
+    std::vector<shalimar::ExprPtr> callArgs;
     shalimar::Block *outerBlock = block_;
     block_ = &prints;
     std::unique_ptr<shalimar::Print> print(new shalimar::Print(false, line));
@@ -1947,22 +1963,6 @@ void CToS::lowerPrintf(CCall &call) {
         flush(print, pending, printHasItems);
         shalimar::ExprPtr item = expression(*args[nextArg]);
 
-        // A temporary is minted at the type of the item as it will be
-        // written, which is what the format says - so the hoist itself
-        // waits until the wraps below have had their say.
-        const shalimar::Type *hoistType = nullptr;
-        if (!isPure(*args[nextArg])) {
-            if (spec == 'f' || spec == 'g' || spec == 'e') {
-                hoistType = shalimar::Type::realType();
-            } else if (spec == 'c') {
-                hoistType = shalimar::Type::charType();
-            } else if (spec == 'd' || spec == 'i' || spec == 'u') {
-                hoistType = shalimar::Type::intType();
-            }
-            // '%s' is left alone: its argument is a char array, and there
-            // is no scalar temporary to put one of those in.
-        }
-
         if (spec == 'f') {
             // printf's %f writes six decimals; Shalimar's default is seven.
             // prec(6) closes the gap, and stays set - every later real in a
@@ -1992,17 +1992,35 @@ void CToS::lowerPrintf(CCall &call) {
             block_ = outerBlock;
             return;
         }
-        if (hoistType != nullptr) {
-            // The item has just gone into the print; take it back out, put
-            // it in a temporary evaluated ahead of everything, and hand the
-            // print the temporary instead.
+        // The item the wraps above settled on is what the function will be
+        // handed: take it back out of the print, make it this call's next
+        // argument, and give the print a parameter to write instead. The
+        // parameter's type is the type of the value as written, which is
+        // what the format said.
+        {
             std::vector<shalimar::ExprPtr> &written = print->items();
             shalimar::ExprPtr value = std::move(written.back());
-            const std::string temp = mintLiftTemp(hoistType);
-            prelude.push_back(shalimar::StmtPtr(new shalimar::Assign(
-                shalimar::ExprPtr(new shalimar::Var(temp)), std::move(value),
-                line)));
-            written.back().reset(new shalimar::Var(temp));
+
+            shalimar::Param param;
+            char pname[16];
+            std::snprintf(pname, sizeof pname, "a%d",
+                          static_cast<int>(params.size()) + 1);
+            param.name = pname;
+            param.byReference = false;
+            if (spec == 'f' || spec == 'g' || spec == 'e') {
+                param.type = shalimar::Type::realType();
+            } else if (spec == 'c') {
+                param.type = shalimar::Type::charType();
+            } else if (spec == 's') {
+                // Text, which in Shalimar is a char array and travels as one.
+                param.type = shalimar::Type::arrayOf(shalimar::Type::charType());
+            } else {
+                param.type = shalimar::Type::intType();
+            }
+
+            written.back().reset(new shalimar::Var(param.name));
+            params.push_back(param);
+            callArgs.push_back(std::move(value));
         }
 
         ++nextArg;
@@ -2016,12 +2034,60 @@ void CToS::lowerPrintf(CCall &call) {
     }
 
     block_ = outerBlock;
-    for (std::size_t i = 0; i < prelude.size(); ++i) {
-        block_->push_back(std::move(prelude[i]));
+
+    if (params.empty()) {
+        // Nothing to pass, so nothing to order: the prints go where the
+        // printf stood.
+        for (std::size_t i = 0; i < prints.size(); ++i) {
+            block_->push_back(std::move(prints[i]));
+        }
+        return;
     }
-    for (std::size_t i = 0; i < prints.size(); ++i) {
-        block_->push_back(std::move(prints[i]));
+
+    const std::string fn = printFunction(text, params, std::move(prints), line);
+
+    std::unique_ptr<shalimar::Call> made(new shalimar::Call(fn, line));
+    for (std::size_t i = 0; i < callArgs.size(); ++i) {
+        made->add(std::move(callArgs[i]));
     }
+    block_->push_back(shalimar::StmtPtr(
+        new shalimar::CallStmt(shalimar::ExprPtr(made.release()), line)));
+}
+
+// The printing function for one format, made once and shared by every call
+// that needs the same one.
+//
+// Two printfs share a function when the format text and the parameter types
+// both match - the body is a function of exactly those two things, so when
+// they agree the bodies would be identical. That is what keeps a printf in
+// a loop from emitting a fresh function per call site, and it is why the
+// types are part of the key: the same format with a char argument and with
+// an int argument writes different things.
+std::string CToS::printFunction(const std::string &format,
+                                const std::vector<shalimar::Param> &params,
+                                shalimar::Block body, int line) {
+    std::string key = format;
+    for (std::size_t i = 0; i < params.size(); ++i) {
+        key += '\x01';
+        key += params[i].type->spelling();
+    }
+    std::map<std::string, std::string>::const_iterator known =
+        printFunctions_.find(key);
+    if (known != printFunctions_.end()) return known->second;
+
+    char stem[24];
+    std::snprintf(stem, sizeof stem, "print_%d", ++printCount_);
+    const std::string name = rename(stem);
+
+    shalimar::Prototype proto(name, line);
+    proto.inputs = params;
+
+    body.push_back(shalimar::StmtPtr(new shalimar::Return(line)));
+    program_->add(std::unique_ptr<shalimar::Function>(
+        new shalimar::Function(std::move(proto), std::move(body))));
+
+    printFunctions_[key] = name;
+    return name;
 }
 
 // ------------------------------------------------------------ declarations

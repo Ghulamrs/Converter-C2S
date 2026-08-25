@@ -151,6 +151,13 @@ private:
     shalimar::ExprPtr charWrap(shalimar::ExprPtr value);
     shalimar::ExprPtr intWrap(shalimar::ExprPtr value);
     void lowerPrintf(CCall &call);
+
+    // The Shalimar function that writes one printf's format, made on first
+    // use and shared by every later call with the same format and the same
+    // parameter types. Returns its name.
+    std::string printFunction(const std::string &format,
+                              const std::vector<shalimar::Param> &params,
+                              shalimar::Block body, int line);
     // Returns false when the general while lowering must run instead. The
     // out parameter separates the two reasons for that: it is set to the
     // counter's name when the shape did count and only the counter being
@@ -249,6 +256,12 @@ private:
     std::map<std::size_t, SwitchTemps> switchTemps_;
     std::set<std::string> usedNames_;      // every Shalimar name handed out
     std::set<std::string> knownFunctions_; // defined in this file
+
+    // Format text and parameter types to the printing function built for
+    // them, so a printf inside a loop makes one function and not one per
+    // turn of the source it was written in.
+    std::map<std::string, std::string> printFunctions_;
+    int printCount_ = 0;
     int beyondCount_ = 0;
     int tempCount_ = 0;
 };
