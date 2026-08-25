@@ -50,6 +50,44 @@ shalimar::ExprPtr sInt(long long value) {
     return shalimar::ExprPtr(new shalimar::IntLit(static_cast<int32_t>(value)));
 }
 
+// Does a call hide anywhere in this expression? A call is the one thing that
+// makes evaluating an lvalue twice observable: '++' and assignment inside an
+// expression are already refused before this is asked, and a division that
+// faults, faults the same way on its first evaluation either way.
+bool containsCall(CExpr &node) {
+    if (dynamic_cast<CCall *>(&node) != nullptr) return true;
+    if (CUnary *unary = dynamic_cast<CUnary *>(&node)) {
+        return containsCall(unary->operand());
+    }
+    if (CBinary *binary = dynamic_cast<CBinary *>(&node)) {
+        return containsCall(binary->lhs()) || containsCall(binary->rhs());
+    }
+    if (CAssign *assign = dynamic_cast<CAssign *>(&node)) {
+        return containsCall(assign->target()) || containsCall(assign->value());
+    }
+    if (CTernary *ternary = dynamic_cast<CTernary *>(&node)) {
+        return containsCall(ternary->cond()) ||
+               containsCall(ternary->thenArm()) ||
+               containsCall(ternary->elseArm());
+    }
+    if (CIndex *index = dynamic_cast<CIndex *>(&node)) {
+        return containsCall(index->base()) || containsCall(index->index());
+    }
+    if (CMember *member = dynamic_cast<CMember *>(&node)) {
+        return containsCall(member->object());
+    }
+    if (CCast *cast = dynamic_cast<CCast *>(&node)) {
+        return containsCall(cast->operand());
+    }
+    if (CComma *comma = dynamic_cast<CComma *>(&node)) {
+        return containsCall(comma->left()) || containsCall(comma->right());
+    }
+    if (CSizeof *size = dynamic_cast<CSizeof *>(&node)) {
+        return size->operand() != nullptr && containsCall(*size->operand());
+    }
+    return false;
+}
+
 
 // A read-only walk over a C subtree, answering two questions at once: how
 // far into the source the subtree reaches, and every place a given name is
@@ -298,6 +336,21 @@ bool CToS::isCharContext(CExpr &other) const {
     return false;
 }
 
+// Is this C expression already char-valued on the Shalimar side? A char
+// variable or an element of a char array converts to a char, and a written
+// (char) cast becomes char(). Everything else - a literal, arithmetic, a
+// call - arrives as an int, and needs char() written around it before shc
+// will let it land where a char is required. The literal cases were handled
+// first and the rest were not, which is how 'c = ch + 1' converted with exit
+// 0 into a file shc refused.
+bool CToS::isCharValued(CExpr &node) const {
+    if (isCharContext(node)) return true;
+    if (CCast *cast = dynamic_cast<CCast *>(&node)) {
+        return cast->type().kind() == CType::Kind::Char;
+    }
+    return false;
+}
+
 shalimar::ExprPtr CToS::charWrap(shalimar::ExprPtr value) {
     return shalimar::ExprPtr(
         new shalimar::Convert(std::move(value), shalimar::Type::charType()));
@@ -392,9 +445,13 @@ void CToS::visit(CUnary &node) {
         return;
     }
     if (op == "!" && node.prefix()) {
-        // Shalimar has no '!'; 'x = 0' answers the same 1 or 0.
+        // Shalimar has no '!'; 'x = 0' answers the same 1 or 0. A char has
+        // to be asked for its code first - shc will not compare a char with
+        // the int 0 - which is the same promotion C performs silently.
+        shalimar::ExprPtr operand = expression(node.operand());
+        if (isCharContext(node.operand())) operand = intWrap(std::move(operand));
         expr_.reset(new shalimar::Binary(shalimar::Binary::Op::Equal,
-                                         expression(node.operand()), sInt(0)));
+                                         std::move(operand), sInt(0)));
         return;
     }
     if (op == "++" || op == "--") {
@@ -615,6 +672,19 @@ void CToS::visit(CBinary &node) {
             else rhs = intWrap(std::move(rhs));
         }
     } else {
+        // Arithmetic on a char is where C's silent promotion changes what a
+        // program means, so writing it out as int() is a permission, not a
+        // default. Comparisons stay above: Shalimar compares chars itself,
+        // and a char against a number is a promotion C and Shalimar agree
+        // must happen for the comparison to exist at all.
+        if ((lhsChar || rhsChar) && !permissions_.charArithmetic()) {
+            markBeyond(node.offset(),
+                       "'" + op + "' on a char - C promotes the char to its "
+                       "code and says nothing; pass --allow-char-arithmetic "
+                       "to write that promotion out as int()");
+            expr_.reset();
+            return;
+        }
         if (lhsChar) lhs = intWrap(std::move(lhs));
         if (rhsChar) rhs = intWrap(std::move(rhs));
     }
@@ -759,15 +829,24 @@ void CToS::visit(CExprStmt &node) {
         // 'x = c ? a : b' becomes if / else writing x twice.
         if (op == "=") {
             if (CTernary *ternary = dynamic_cast<CTernary *>(&assign->value())) {
+                const bool charTarget = isCharContext(assign->target());
                 std::unique_ptr<shalimar::If> branch(
                     new shalimar::If(lineOf(node.offset())));
+                shalimar::ExprPtr thenValue = expression(ternary->thenArm());
+                if (charTarget && !isCharValued(ternary->thenArm())) {
+                    thenValue = charWrap(std::move(thenValue));
+                }
                 shalimar::Block thenBody;
                 thenBody.push_back(shalimar::StmtPtr(new shalimar::Assign(
-                    expression(assign->target()), expression(ternary->thenArm()),
+                    expression(assign->target()), std::move(thenValue),
                     lineOf(node.offset()))));
+                shalimar::ExprPtr elseValue = expression(ternary->elseArm());
+                if (charTarget && !isCharValued(ternary->elseArm())) {
+                    elseValue = charWrap(std::move(elseValue));
+                }
                 shalimar::Block elseBody;
                 elseBody.push_back(shalimar::StmtPtr(new shalimar::Assign(
-                    expression(assign->target()), expression(ternary->elseArm()),
+                    expression(assign->target()), std::move(elseValue),
                     lineOf(node.offset()))));
                 branch->addBranch(expression(ternary->cond()), std::move(thenBody));
                 branch->setElse(std::move(elseBody));
@@ -778,6 +857,19 @@ void CToS::visit(CExprStmt &node) {
             // 'a = b = c' unchains right to left.
             if (CAssign *inner = dynamic_cast<CAssign *>(&assign->value())) {
                 if (inner->op() == "=") {
+                    // The unchaining reads the inner target back, so the
+                    // output evaluates it twice where C evaluated it once.
+                    // Only a call in it can make that observable, and one
+                    // did: 'a = b[f()] = 5' ran f twice.
+                    if (containsCall(inner->target())) {
+                        markBeyond(node.offset(),
+                                   "a chained assignment whose inner target "
+                                   "calls a function - reading it back would "
+                                   "run the call twice; write the two "
+                                   "assignments out, indexing once into a "
+                                   "variable");
+                        return;
+                    }
                     // Convert the inner assignment first, then assign its
                     // target to the outer target.
                     shalimar::ExprPtr innerTarget = expression(inner->target());
@@ -798,14 +890,13 @@ void CToS::visit(CExprStmt &node) {
             // assignment they compute a value for.
             canLift_ = true;
             shalimar::ExprPtr value = expression(assign->value());
-            // A literal stored into a char lands as char(n). Both spellings
-            // of one count: C writes the NUL that ends a string as 0 rather
-            // than as '\0', and an unwrapped 0 assigned into a char array
-            // reached shc as an int and was refused - so the converter had
-            // reported success and written a file that would not compile.
-            if (isCharContext(assign->target()) &&
-                (dynamic_cast<CCharLit *>(&assign->value()) != nullptr ||
-                 dynamic_cast<CIntLit *>(&assign->value()) != nullptr)) {
+            // A value stored into a char lands as char(n). This began as the
+            // two literal spellings of one - C writes the NUL that ends a
+            // string as 0 rather than as '\0' - and turned out to be every
+            // int-valued expression: shc refuses an unwrapped int wherever a
+            // char is required, so 'c = ch + 1' was a file the converter
+            // reported converting and shc would not compile.
+            if (isCharContext(assign->target()) && !isCharValued(assign->value())) {
                 value = charWrap(std::move(value));
             }
             shalimar::ExprPtr target = expression(assign->target());
@@ -829,6 +920,18 @@ void CToS::visit(CExprStmt &node) {
             return;
         }
         if (op == "*=" || op == "/=" || op == "%=") {
+            // The spelled-out 'x : x * e' evaluates x twice where C's 'x *= e'
+            // evaluates it once. Harmless until a call hides in the target -
+            // 'b[f()] *= 3' ran f twice - so that shape is refused rather
+            // than quietly doubled.
+            if (containsCall(assign->target())) {
+                markBeyond(node.offset(),
+                           "'" + op + "' on a target that calls a function - "
+                           "the spelled-out form reads the target twice and "
+                           "would run the call twice; index once into a "
+                           "variable first");
+                return;
+            }
             const shalimar::Binary::Op mapped =
                 op == "*=" ? shalimar::Binary::Op::Multiply
                            : op == "/=" ? shalimar::Binary::Op::Divide
@@ -897,8 +1000,7 @@ void CToS::visit(CDeclStmt &node) {
         if (info.rank != 0) continue;              // arrays init at the top
 
         shalimar::ExprPtr value = expression(*declarator.init->expr());
-        if (dynamic_cast<CCharLit *>(declarator.init->expr()) != nullptr &&
-            info.isChar) {
+        if (info.isChar && !isCharValued(*declarator.init->expr())) {
             value = charWrap(std::move(value));
         }
         block_->push_back(shalimar::StmtPtr(new shalimar::Assign(
@@ -1456,9 +1558,14 @@ void CToS::lowerSwitch(CSwitch &node) {
     const SwitchTemps names = minted->second;
     const std::string selector = names.selector;
 
+    // C promotes the selector to int whatever it arrived as, and int()
+    // writes that promotion down: it is the identity on an int, and on a
+    // char it is the code the case values compare against. Without it a
+    // char selector reached the int temporary as a char, and shc refused a
+    // file this converter had reported converting.
     block_->push_back(shalimar::StmtPtr(new shalimar::Assign(
-        shalimar::ExprPtr(new shalimar::Var(selector)), expression(node.cond()),
-        lineOf(node.offset()))));
+        shalimar::ExprPtr(new shalimar::Var(selector)),
+        intWrap(expression(node.cond())), lineOf(node.offset()))));
 
     // Walk the case list. Each entry in the C tree is a CCase owning its
     // labelled statement; the rest of a case's body is the following
@@ -1911,9 +2018,13 @@ void CToS::lowerPrintf(CCall &call) {
         }
         if (c != '%') {
             if (static_cast<unsigned char>(c) < 32 || c == '"') {
+                // block_ goes back first: while it points at the holding
+                // block the marker would land there and be discarded with
+                // it - a refusal counted but never shown, the exact fault
+                // the suite's marker count exists to catch.
+                block_ = outerBlock;
                 markBeyond(call.offset(),
                            "a format character Shalimar cannot spell");
-                block_ = outerBlock;
                 return;
             }
             // The mirror of the strip before a hole: a space directly after
@@ -1925,8 +2036,8 @@ void CToS::lowerPrintf(CCall &call) {
         // A specifier.
         ++i;
         if (i >= text.size()) {
-            markBeyond(call.offset(), "a format ending in '%'");
             block_ = outerBlock;
+            markBeyond(call.offset(), "a format ending in '%'");
             return;
         }
         // A length modifier names a width Shalimar has not got. Under
@@ -1940,8 +2051,8 @@ void CToS::lowerPrintf(CCall &call) {
             ++i;
         }
         if (i >= text.size()) {
-            markBeyond(call.offset(), "a format ending in '%'");
             block_ = outerBlock;
+            markBeyond(call.offset(), "a format ending in '%'");
             return;
         }
         const char spec = text[i];
@@ -1950,8 +2061,8 @@ void CToS::lowerPrintf(CCall &call) {
             continue;
         }
         if (nextArg >= args.size()) {
-            markBeyond(call.offset(), "more format holes than arguments");
             block_ = outerBlock;
+            markBeyond(call.offset(), "more format holes than arguments");
             return;
         }
         // '?' writes a space after every item, so the single space printf
@@ -1986,10 +2097,10 @@ void CToS::lowerPrintf(CCall &call) {
         } else if (spec == 'c') {
             print->add(charWrap(std::move(item)));
         } else {
+            block_ = outerBlock;
             markBeyond(call.offset(),
                        std::string("the '%") + spec + "' format - only plain "
                        "%d %i %f %g %e %s %c carry");
-            block_ = outerBlock;
             return;
         }
         // The item the wraps above settled on is what the function will be
@@ -2025,6 +2136,20 @@ void CToS::lowerPrintf(CCall &call) {
 
         ++nextArg;
         printHasItems = true;
+    }
+
+    // C evaluates every argument of a printf, holes or no holes, and the
+    // ones beyond the format still run their side effects before anything
+    // prints. Dropping them here silently changed what the program did -
+    // the one thing this converter must never do - and Shalimar has no
+    // statement that evaluates a value only to discard it, so the mismatch
+    // goes back to the author instead.
+    if (nextArg < args.size()) {
+        block_ = outerBlock;
+        markBeyond(call.offset(),
+                   "printf with more arguments than the format has holes - C "
+                   "evaluates the extras; give each one a hole, or drop it");
+        return;
     }
 
     flush(print, pending, printHasItems);
@@ -2214,8 +2339,7 @@ void CToS::declareLocal(CDeclaration &decl, bool atTop) {
                 // file-scope initialiser to be a constant expression, so
                 // there is nothing here that needed a statement anyway.
                 shalimar::ExprPtr value = expression(*declarator.init->expr());
-                if (dynamic_cast<CCharLit *>(declarator.init->expr()) != nullptr &&
-                    info.isChar) {
+                if (info.isChar && !isCharValued(*declarator.init->expr())) {
                     value = charWrap(std::move(value));
                 }
                 made->initial() = std::move(value);

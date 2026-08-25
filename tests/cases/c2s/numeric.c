@@ -1,10 +1,11 @@
 /* The scalar arithmetic that has to survive the crossing.
  *
- * The char lines are the point of the file. C promotes a char to int the
- * moment it is used arithmetically and says nothing about it; Shalimar has
- * no such rule and refuses '+' on a char outright. So the promotion has to
- * be written into the output as int() - and where it is missed on a '%d',
- * shc accepts the result and prints the character where C printed its code.
+ * Everything here converts with no permission asked: plain int and real
+ * arithmetic, the compound assignments spelling themselves out, and the
+ * hex and octal literals arriving in decimal. The '%d' of a char - a
+ * printing question, not an arithmetic one - stays here too. What left is
+ * 'ch + 1': arithmetic on a char is C's silent promotion, which is now a
+ * permission, and cases/allow/chararith.c holds that story.
  */
 
 #include <stdio.h>
@@ -29,7 +30,7 @@ int main(void)
 
     printf("n %d h %d o %d\n", n, h, o);
     printf("x %f trunc %d\n", x, (int)x);
-    printf("ch %d next %d\n", ch, ch + 1);
+    printf("ch %d \n", ch);
     printf("real %f\n", (double)n / 4.0);
     return 0;
 }

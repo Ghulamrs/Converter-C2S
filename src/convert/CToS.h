@@ -148,6 +148,7 @@ private:
     // at, declared at the top of the function once its walk is done.
     std::vector<std::pair<std::string, const shalimar::Type *> > liftTemps_;
     bool isCharContext(CExpr &other) const;
+    bool isCharValued(CExpr &node) const;
     shalimar::ExprPtr charWrap(shalimar::ExprPtr value);
     shalimar::ExprPtr intWrap(shalimar::ExprPtr value);
     void lowerPrintf(CCall &call);
