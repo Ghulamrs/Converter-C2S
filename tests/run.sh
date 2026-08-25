@@ -32,7 +32,14 @@
 
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
-c2s="$here/../c2s.exe"
+# All three are overridable, and for the same reason. A workspace build puts
+# every binary in one directory rather than in each repository's own root, so
+# the converter is no more reliably beside this script than the oracles are -
+# and deriving it from $here alone meant a group build ran the whole suite
+# against a c2s that was not there. That failed 59 of 59 rather than passing,
+# which is the good version of the fault, but it is still a suite that could
+# not run being reported as a suite that failed.
+c2s="${C2S:-$here/../c2s.exe}"
 CC1="${CC1:-$here/../../Compiler-C/cc1.exe}"
 SHC="${SHC:-$here/../../Compiler-S/shc.exe}"
 out="$here/out"
@@ -48,8 +55,12 @@ flagsfor() {
     if [ -f "$1" ]; then cat "$1"; fi
 }
 
+if [ ! -x "$c2s" ]; then echo "no c2s at $c2s - set C2S="; exit 2; fi
 if [ ! -x "$CC1" ]; then echo "no cc1 oracle at $CC1 - set CC1="; exit 2; fi
 if [ ! -x "$SHC" ]; then echo "no shc oracle at $SHC - set SHC="; exit 2; fi
+echo "c2s $c2s"
+echo "cc1 $CC1"
+echo "shc $SHC"
 
 for f in "$here"/cases/s2c/*.shm; do
     n=$(basename "$f" .shm)

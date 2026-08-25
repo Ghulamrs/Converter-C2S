@@ -66,8 +66,11 @@ $(OBJDIR)/%.o: src/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $(DEPFLAGS) -c -o $@ $<
 
+# C2S as well as the two oracles: $(TARGET) follows BINDIR, and a workspace
+# build points BINDIR somewhere else entirely, so the suite cannot find the
+# binary by looking beside itself.
 test: $(TARGET) vendor-check
-	CC1=$(CC1) SHC=$(SHC) ./tests/run.sh
+	C2S=$(abspath $(TARGET)) CC1=$(CC1) SHC=$(SHC) ./tests/run.sh
 
 # Re-copy the Shalimar front end from Compiler-S. This is the whole of what
 # "upgrade Shalimar and the converter follows" means here: change that
