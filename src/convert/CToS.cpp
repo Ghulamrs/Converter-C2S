@@ -1113,19 +1113,19 @@ bool CToS::lowerCountingFor(CFor &node, std::string *escapedCounter) {
 
     long long sign = 0;
     CExpr *stepAmount = nullptr;
-    if (CUnary *bump = dynamic_cast<CUnary *>(node.step())) {
-        CIdent *stepVar = dynamic_cast<CIdent *>(&bump->operand());
+    if (CUnary *unary = dynamic_cast<CUnary *>(node.step())) {
+        CIdent *stepVar = dynamic_cast<CIdent *>(&unary->operand());
         if (stepVar == nullptr || stepVar->name() != name) return false;
-        if (bump->op() == "++") sign = 1;
-        else if (bump->op() == "--") sign = -1;
+        if (unary->op() == "++") sign = 1;
+        else if (unary->op() == "--") sign = -1;
         else return false;
-    } else if (CAssign *bump = dynamic_cast<CAssign *>(node.step())) {
-        CIdent *stepVar = dynamic_cast<CIdent *>(&bump->target());
+    } else if (CAssign *compound = dynamic_cast<CAssign *>(node.step())) {
+        CIdent *stepVar = dynamic_cast<CIdent *>(&compound->target());
         if (stepVar == nullptr || stepVar->name() != name) return false;
-        if (bump->op() == "+=") sign = 1;
-        else if (bump->op() == "-=") sign = -1;
+        if (compound->op() == "+=") sign = 1;
+        else if (compound->op() == "-=") sign = -1;
         else return false;
-        stepAmount = &bump->value();
+        stepAmount = &compound->value();
     } else {
         return false;
     }
