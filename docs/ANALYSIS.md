@@ -266,6 +266,30 @@ errors. The converter does better, and each is exercised by
 - `a = b = c` as a whole statement lifts into two statements in order. Only an
   assignment reaching an enclosing *expression* is refused.
 
+**Where a lowering stops.** Each of these has a neighbouring form the
+converter does handle, which is what makes the boundary worth writing down —
+a boundary can move without anyone noticing. `tests/cases/beyond/lowering.c`
+pins all four, and the positive cases named beside each hold the form that
+works.
+
+- `?:` is lowered where it is the **whole right side of an assignment**, into
+  an `if`/`else` over the target. In a `return`, or nested inside a larger
+  expression, there is no target to branch over, and it is refused.
+  (`tests/cases/c2s/ternary.c`.)
+- `do`-`while` is peeled — the body once, then a `while`. A `break` or
+  `continue` in the body would land in the peeled copy, outside any loop, so
+  that combination is refused.
+- `&&` and `||` become `&` and `|` only when the right side is **pure**.
+  Shalimar's forms evaluate both sides, and `i < n && a[i]` is the reason
+  short-circuit exists, so indexing, calls and division on the right are
+  refused. (`tests/cases/c2s/logic.c`.)
+- A counting `for` keeps Shalimar's `for i : a to b` only while **nothing
+  reads the counter after the loop**: Shalimar's binds its own counter and C
+  leaves the variable holding what ended the loop. Where it is read, the loop
+  falls back to the `while` lowering — and a `continue` in *that* would skip
+  the step, so the two together are refused. Either alone converts.
+  (`tests/cases/c2s/counters.c` and `tests/cases/c2s/skipping.c`.)
+
 **Variadic functions** are refused, but not as variadic: a call to one is
 turned down for being a name neither defined in the file nor one of the twenty
 builtins. A *definition* never gets that far — it needs `va_list`, a typedef

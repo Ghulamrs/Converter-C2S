@@ -31,8 +31,11 @@ class Diagnostics;
 //     empty grouped cases joined with '|', the trailing 'break' of each
 //     case dropped. Genuine fall-through is a marker.
 //   - 'do { } while (c)' is peeled: the body once, then a while.
-//   - Counting 'for' loops become 'for i : a to b step k'; any other shape
-//     lowers to a while with the step at the body's end.
+//   - Counting 'for' loops become 'for i : a to b step k', but only where
+//     nothing reads the counter after the loop - Shalimar's for binds its
+//     own, and C's leaves the variable holding what ended the loop. That
+//     case, and any other shape, lower to a while with the step at the
+//     body's end, which assigns the variable C's way.
 //   - Block-scoped declarations hoist to the top of the function, renamed
 //     where scopes collided; C block structure flattens away.
 //   - 'x ? a : b' as the whole right side of an assignment becomes an
@@ -119,8 +122,15 @@ private:
     bool isPure(CExpr &node) const;
     bool isCharContext(CExpr &other) const;
     shalimar::ExprPtr charWrap(shalimar::ExprPtr value);
+    shalimar::ExprPtr intWrap(shalimar::ExprPtr value);
     void lowerPrintf(CCall &call);
-    bool lowerCountingFor(CFor &node);
+    // Returns false when the general while lowering must run instead. The
+    // out parameter separates the two reasons for that: it is set to the
+    // counter's name when the shape did count and only the counter being
+    // read afterwards ruled the form out, and left empty otherwise. The
+    // caller's diagnostic is a different sentence in each case.
+    bool lowerCountingFor(CFor &node, std::string *escapedCounter);
+    bool counterEscapes(CFor &node, const std::string &name) const;
     void lowerSwitch(CSwitch &node);
     void hoistDeclarations(CStmt &node, shalimar::Block *top);
     void convertTopDeclaration(CDeclaration &decl);
@@ -139,10 +149,31 @@ private:
     shalimar::Block *block_ = nullptr;
     shalimar::ExprPtr expr_;
     bool currentIsMain_ = false;
+    CFunctionDef *currentFn_ = nullptr;   // for the whole-function scans
     int loopDepth_ = 0;
 
     // Name scopes: each maps a C name to its Info; lookups walk outward.
     std::vector<std::map<std::string, Info>> scopes_;
+
+    // What the hoist walk decided about each local, keyed by the source
+    // offset of its declarator, and the selector name it minted for each
+    // switch, keyed by the switch's offset.
+    //
+    // The hoist has to run first - Shalimar wants every Declare at the top
+    // of the function, so the names must exist before a statement can use
+    // one. But it walks the function flat, with no scope stack, so it is in
+    // no position to say which scope a name belongs to. Registering there
+    // put every local in one map, where an inner shadow overwrote the outer
+    // entry and both names then resolved to whichever came last. The names
+    // were distinct in the output and the bindings were not, which is the
+    // shape of bug that compiles and runs and prints the wrong number.
+    //
+    // So the hoist parks its findings here, and the statement walk registers
+    // each one into the scope it is actually in, at the point the
+    // declaration stands - which is where C says the name becomes visible,
+    // and where block() will pop it again.
+    std::map<std::size_t, Info> hoisted_;
+    std::map<std::size_t, std::string> switchTemps_;
     std::set<std::string> usedNames_;      // every Shalimar name handed out
     std::set<std::string> knownFunctions_; // defined in this file
     int beyondCount_ = 0;

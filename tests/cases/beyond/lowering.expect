@@ -1,0 +1,4 @@
+'?:' inside an expression
+a do-while whose body breaks or continues
+'&&' whose right side is not pure
+is read after the loop and whose body continues
