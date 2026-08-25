@@ -181,6 +181,25 @@ they interact:
   `#line`, `#pragma` and `#error` are each reported with file and line as
   *fix-before-conversion*, and the run stops.
 
+  **`#define` was taken out of that list on 2026-08-25.** Sweeping it in with the
+  conditionals was too broad, and it cost the converter work it could do itself:
+  `#define PI 3.14159` decides nothing, and stopping a conversion to demand that
+  the author expand it by hand was asking for a substitution rather than a
+  decision. The line the policy actually wants is **does this change which
+  program this is** — so a `#define` is reported when a `#if`, `#ifdef`, `#ifndef`
+  or `#elif` anywhere in the file tests its name, and otherwise it is collected
+  and substituted. `#undef` stays reported: it changes what a name means partway
+  down a file, which is a decision even though it looks like a definition.
+
+  The substitution happens **on the token stream, after lexing**, not on the text.
+  Rewriting the text would move every byte after the first replacement, and the
+  offsets that diagnostics and `--canon` quote the source by would then point at
+  the wrong line for the rest of the file. Instead each token out of a
+  replacement carries the offset of the place the macro was *written*, so a
+  refusal inside an expanded macro still quotes the call as the author typed it.
+  `src/c/CMacro.cpp` is the pass; `tests/cases/c2s/macros.c` is what it has to
+  get right and `tests/cases/defines/defines.c` is what it must still refuse.
+
 Note also that Shalimar has **no block comments** — only `//`. Every `/* … */` in a C
 source has to become one or more `//` lines if comments are carried across at all
 (Decision 5).

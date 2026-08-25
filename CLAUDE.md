@@ -55,13 +55,22 @@ Two consequences of not linking, both deliberate:
 ## Architecture
 
 ```
-a.c   -> c/CPreScan -> c/CLexer -> c/CParser -> CAst
+a.c   -> c/CPreScan -> c/CLexer -> c/CMacro -> c/CParser -> CAst
                                                  |
                                     convert/CToS -> SAst -> s/SPrinter -> a.shm
 
 b.shm -> s/SFrontEnd -> SAst -> convert/SToC -> CAst -> c/CPrinter -> b.c
          (s/vendor: Lexer, Parser, Check)
 ```
+
+`c/CMacro` is the one pass that is not on the way to a tree: it substitutes
+the `#define`s that name a value, on the **token stream** rather than on the
+text. That placement is the whole point of it — see `docs/ANALYSIS.md` §5.
+Rewriting the text would move every byte after the first replacement and
+every diagnostic offset with it, so instead a token out of a replacement
+carries the offset of the place the macro was *written*. A `#define` that a
+conditional tests is not substituted at all; `CPreScan` sends that one back
+to the author, because it decides which program this is.
 
 **There is no third IR.** `CAst` and `SAst` are the two, and there is no pass
 between them either: `CToS` and `SToC` each walk their input tree once and

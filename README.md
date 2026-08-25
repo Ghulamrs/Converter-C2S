@@ -21,11 +21,31 @@ declarations resolve — `cc1` refuses an undeclared name, so `sqrt` will not
 parse without `<math.h>` — but nothing that came from a header is translated.
 Only what the named file itself contributed reaches the output.
 
-**A preprocessor construct that changes the program is reported, not
-translated.** `#include` is accepted and dropped. `#define`, `#if`, `#ifdef`,
-`#pragma` and the rest are each reported with a file and a line, and the run
-stops. They are answered by hand before conversion starts, because until they
-are, what the parser saw is not what the author wrote.
+**A preprocessor construct that decides *which program this is* is reported,
+not translated.** `#include` is accepted and dropped. `#if`, `#ifdef`,
+`#ifndef`, `#elif`, `#else`, `#endif` — and any `#define` one of those tests —
+are each reported with a file and a line, and the run stops. `#undef`,
+`#pragma`, `#error` and `#line` likewise. They are answered by hand before
+conversion starts, because until they are, what the parser saw is not what the
+author wrote:
+
+```c
+#define TEST_VERSION
+#ifdef TEST_VERSION
+float  test = 0.0f;
+#else
+double test = 0.0;
+#endif
+```
+
+There are two programs there and nothing in the file says which is wanted.
+
+**A `#define` that only names a value is expanded, not reported.** `#define PI
+3.14159` does not branch anything — it names a number, and substituting it is
+what the author meant. Object-like and function-like macros alike are
+substituted into the token stream after lexing, so a diagnostic still quotes
+the line as it was written rather than as it expanded. Only a replacement
+using `#` or `##` goes back to the author, having no token-level equivalent.
 
 **A construct with no expression in the target language is a conversion
 error**, with the line, the column, the source quoted back and what to write

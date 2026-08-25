@@ -2,6 +2,7 @@
 
 #include "Source.h"
 #include "c/CLexer.h"
+#include "c/CMacro.h"
 #include "c/CParser.h"
 #include "c/CPreScan.h"
 #include "c/CPrinter.h"
@@ -37,6 +38,15 @@ Converter::Result Converter::convert(const std::string &sourceText,
             diagnostics.report(Severity::SyntaxError, source,
                                source.locate(lexed.errorOffset), "C1001",
                                lexed.error);
+            result.diagnostics = diagnostics.messages();
+            result.summary = diagnostics.summary();
+            return result;
+        }
+
+        // The #defines that name a value go in where they were written.
+        // After lexing, so that the offsets a diagnostic quotes by still
+        // point into the file the author edited - see CMacro.h.
+        if (!expandMacros(prescan.macros(), lexed.tokens, source, diagnostics)) {
             result.diagnostics = diagnostics.messages();
             result.summary = diagnostics.summary();
             return result;
@@ -145,6 +155,15 @@ Converter::Result Converter::canonicalise(const std::string &sourceText,
             result.summary = diagnostics.summary();
             return result;
         }
+        // The #defines that name a value go in where they were written.
+        // After lexing, so that the offsets a diagnostic quotes by still
+        // point into the file the author edited - see CMacro.h.
+        if (!expandMacros(prescan.macros(), lexed.tokens, source, diagnostics)) {
+            result.diagnostics = diagnostics.messages();
+            result.summary = diagnostics.summary();
+            return result;
+        }
+
         CParser parser(source, std::move(lexed.tokens), diagnostics);
         std::unique_ptr<CProgram> program = parser.parse();
         if (program == nullptr || diagnostics.hasErrors()) {
