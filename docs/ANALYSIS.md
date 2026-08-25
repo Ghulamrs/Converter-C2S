@@ -470,6 +470,9 @@ versa) fails the suite.
 
 ---
 
-*Nothing has been written to `Converter-C2S` beyond this document. `git init` and the
-remote are not set up yet — say the word and I will, though the push itself will need
-your credentials from your machine.*
+*Written after the fact: every milestone above is delivered and on `main`, with one
+omission and one departure. The omission is the MSVC project in milestone 0 — there is
+none, and the tree is built by the Makefile alone. The departure is milestone 5, which
+arrived as lowerings inside `CToS` rather than as the `Normalise` pass §12 named; §10's
+argument for separating it is still unanswered. Milestone 7's suite is 35 cases and runs
+green against the real `cc1.exe` and `shc.exe`.*
