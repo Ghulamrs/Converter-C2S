@@ -489,8 +489,9 @@ void CToS::visit(CAssign &node) {
 
 void CToS::visit(CTernary &node) {
     markBeyond(node.offset(),
-               "'?:' inside an expression - only 'x = c ? a : b' as a whole "
-               "statement becomes if / else");
+               "'?:' inside an expression - it becomes if / else only where "
+               "there is a statement to expand into, which is 'x = c ? a : b' "
+               "and 'return c ? a : b'");
     expr_.reset();
 }
 
@@ -1223,7 +1224,66 @@ void CToS::visit(CContinue &node) {
         new shalimar::Continue(lineOf(node.offset()))));
 }
 
+bool CToS::lowerTernaryReturn(CTernary &top, std::size_t offset,
+                             shalimar::Block *into) {
+    // 'return c ? a : b' as an if / else with a return in each arm. An
+    // assignment's version of this writes the target twice; there is no
+    // target here, but two returns say the same thing.
+    const int before = beyondCount_;
+    std::unique_ptr<shalimar::If> branch(new shalimar::If(lineOf(offset)));
+
+    CTernary *walk = &top;
+    for (;;) {
+        shalimar::ExprPtr cond = expression(walk->cond());
+        shalimar::Block thenBody;
+        if (!returnArm(walk->thenArm(), offset, &thenBody)) return false;
+        branch->addBranch(std::move(cond), std::move(thenBody));
+
+        // A conditional in the else position flattens into 'elseif' rather
+        // than nesting: 'elseif' is one keyword in Shalimar and an 'if'
+        // inside an 'else' is not grammatical. visit(CIf) walks its chain
+        // for the same reason.
+        if (CTernary *chained = dynamic_cast<CTernary *>(&walk->elseArm())) {
+            walk = chained;
+            continue;
+        }
+        shalimar::Block elseBody;
+        if (!returnArm(walk->elseArm(), offset, &elseBody)) return false;
+        branch->setElse(std::move(elseBody));
+        break;
+    }
+
+    // Something in an arm was refused. The marker is already in the block
+    // where the return stood; adding a branch that returns a placeholder
+    // beside it would be a function quietly answering the wrong number.
+    if (beyondCount_ != before) return false;
+    into->push_back(shalimar::StmtPtr(branch.release()));
+    return true;
+}
+
+bool CToS::returnArm(CExpr &value, std::size_t offset, shalimar::Block *into) {
+    // A conditional in the 'then' position nests instead, which is
+    // grammatical - it is only 'else' that cannot take an 'if'.
+    if (CTernary *nested = dynamic_cast<CTernary *>(&value)) {
+        return lowerTernaryReturn(*nested, offset, into);
+    }
+    std::unique_ptr<shalimar::Return> ret(new shalimar::Return(lineOf(offset)));
+    ret->add(expression(value));
+    into->push_back(shalimar::StmtPtr(ret.release()));
+    return true;
+}
+
 void CToS::visit(CReturn &node) {
+    // 'return c ? a : b' expands into statements, so it is taken before the
+    // value is treated as an expression. Not in main, where a returned
+    // value is an exit status and has no Shalimar meaning either way.
+    if (node.value() != nullptr && !currentIsMain_) {
+        if (CTernary *ternary = dynamic_cast<CTernary *>(node.value())) {
+            lowerTernaryReturn(*ternary, node.offset(), block_);
+            return;
+        }
+    }
+
     const int before = beyondCount_;
     std::unique_ptr<shalimar::Return> ret(
         new shalimar::Return(lineOf(node.offset())));

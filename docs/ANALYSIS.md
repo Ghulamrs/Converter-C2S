@@ -291,10 +291,14 @@ a boundary can move without anyone noticing. `tests/cases/beyond/lowering.c`
 pins all four, and the positive cases named beside each hold the form that
 works.
 
-- `?:` is lowered where it is the **whole right side of an assignment**, into
-  an `if`/`else` over the target. In a `return`, or nested inside a larger
-  expression, there is no target to branch over, and it is refused.
-  (`tests/cases/c2s/ternary.c`.)
+- `?:` is lowered wherever **a statement can be expanded around it**: as the
+  whole right side of an assignment, into an `if`/`else` writing the target in
+  each arm, and as the whole of a `return`, into one that returns in each arm.
+  A chain flattens into `elseif` rather than nesting, because `elseif` is one
+  keyword in Shalimar and an `if` inside an `else` is not grammatical. Only
+  where the conditional is *part* of a larger expression — an operand, a call
+  argument — is there nowhere to put the branch, and there it is refused.
+  (`tests/cases/c2s/ternary.c` and `tests/cases/c2s/returns.c`.)
 - `do`-`while` is peeled — the body once, then a `while`. A `break` or
   `continue` in the body would land in the peeled copy, outside any loop, so
   that combination is refused.

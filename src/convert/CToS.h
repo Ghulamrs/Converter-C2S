@@ -38,9 +38,14 @@ class Diagnostics;
 //     body's end, which assigns the variable C's way.
 //   - Block-scoped declarations hoist to the top of the function, renamed
 //     where scopes collided; C block structure flattens away.
-//   - 'x ? a : b' as the whole right side of an assignment becomes an
-//     if / else; '++', '--' and the compound assignments become '+:', '-:'
-//     or spelled-out assignments; '!x' becomes 'x = 0'.
+//   - 'x ? a : b' becomes an if / else in the two places there is somewhere
+//     to put the branch: as the whole right side of an assignment, writing
+//     the target in each arm, and as the whole of a return, returning in
+//     each arm. A chain of them flattens into 'elseif'. Anywhere else - in
+//     a call argument, inside a larger expression - there is no statement
+//     to expand into and it is a marker.
+//   - '++', '--' and the compound assignments become '+:', '-:' or
+//     spelled-out assignments; '!x' becomes 'x = 0'.
 //   - printf with a literal format becomes '?' / '??' items; puts and
 //     putchar likewise. The '?' item spacing is Shalimar's own, so printed
 //     output matches up to whitespace, not byte for byte.
@@ -132,6 +137,9 @@ private:
     bool lowerCountingFor(CFor &node, std::string *escapedCounter);
     bool counterEscapes(CFor &node, const std::string &name) const;
     void lowerSwitch(CSwitch &node);
+    bool lowerTernaryReturn(CTernary &top, std::size_t offset,
+                            shalimar::Block *into);
+    bool returnArm(CExpr &value, std::size_t offset, shalimar::Block *into);
     void hoistDeclarations(CStmt &node, shalimar::Block *top);
     void convertTopDeclaration(CDeclaration &decl);
     std::size_t declOffset(CDeclaration &decl) const;

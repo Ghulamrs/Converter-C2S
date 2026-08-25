@@ -69,8 +69,9 @@ preprocessor and twenty builtins. So:
 - **C89 → Shalimar is mostly a rejection problem.** Most of C has no target.
   The work is deciding precisely what cannot be said, saying where, and
   lowering the handful of things that can be rewritten — `switch` into
-  `if`/`elseif`/`else`, `do`-`while` into `while`, `?:` into a branch and a
-  temporary, block-scoped declarations to the top of the function.
+  `if`/`elseif`/`else`, `do`-`while` into `while`, `?:` into a branch — over
+  the target of an assignment, or over two returns — block-scoped
+  declarations to the top of the function.
 - **Shalimar → C89 is mostly a runtime problem.** Nearly every construct has a
   C89 spelling, but arrays carry their own extents, `char[]` is text with `+`
   and comparison, and `?` prints — and C89 has none of those. Extents travel
