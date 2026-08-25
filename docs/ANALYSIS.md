@@ -229,7 +229,7 @@ source has to become one or more `//` lines if comments are carried across at al
 
 | C89 | Rewrite | Note |
 | --- | --- | --- |
-| `switch` | `if` / `elseif` / `else` | you approved this; but see §8 — fall-through and `break` are the catch |
+| `switch` | `if` / `elseif` / `else`, or an entry index and a done flag where a case falls through | see §8; both shapes are automatic, neither is asked for |
 | `do { } while (c);` | peeled first iteration, or a flag + `while` | doubles the body or adds a variable |
 | `a ? b : c` | an `if`/`else` writing a temporary declared at the top of the function | ternary in an argument position needs statement lifting |
 | `x++`, `x += e` | `x +: 1`, `x +: e` | Shalimar has **only** `+:` and `-:`; `*=`, `/=`, `%=` become `x : x * e` |

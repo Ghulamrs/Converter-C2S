@@ -1,4 +1,4 @@
-/* --allow-fall-through, and an arm that leaves from the middle.
+/* Falling through, and an arm that leaves from the middle.
  *
  * The two rewrites have to compose. Fall-through turns the arms into
  * guarded blocks tested by an entry index, and a mid-arm break has to

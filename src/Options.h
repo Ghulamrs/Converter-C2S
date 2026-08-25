@@ -13,14 +13,11 @@ enum class Direction { Infer, CToShalimar, ShalimarToC };
 class Permissions {
 public:
     Permissions()
-        : shortCircuit_(false), fallThrough_(false), charArithmetic_(false),
-          narrowing_(false) {}
+        : shortCircuit_(false), charArithmetic_(false), narrowing_(false) {}
 
     bool shortCircuit() const { return shortCircuit_; }
     void allowShortCircuit() { shortCircuit_ = true; }
 
-    bool fallThrough() const { return fallThrough_; }
-    void allowFallThrough() { fallThrough_ = true; }
 
     bool charArithmetic() const { return charArithmetic_; }
     void allowCharArithmetic() { charArithmetic_ = true; }
@@ -30,14 +27,12 @@ public:
 
     void allowEverything() {
         shortCircuit_ = true;
-        fallThrough_ = true;
         charArithmetic_ = true;
         narrowing_ = true;
     }
 
 private:
     bool shortCircuit_;
-    bool fallThrough_;
     bool charArithmetic_;
     bool narrowing_;
 };

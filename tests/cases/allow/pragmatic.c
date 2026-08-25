@@ -1,4 +1,4 @@
-/* --pragmatic: all four permissions at once, in one program.
+/* --pragmatic: every permission at once, in one program.
  *
  * Each of the three rewrites has a case of its own; this is the one
  * that says they compose. They interact in ways worth pinning: the

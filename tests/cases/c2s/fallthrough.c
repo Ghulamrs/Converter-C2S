@@ -1,4 +1,9 @@
-/* --allow-fall-through: a switch case that runs on into the next.
+/* A switch case that runs on into the next.
+ *
+ * Lowered, not refused, and without being asked for: unlike the rewrites
+ * that sit behind a permission this one changes nothing about what the
+ * program means. What it costs is the if/elseif chain's readability, and
+ * only for a switch that actually falls through.
  *
  * The if/elseif chain the ordinary lowering builds cannot say "and then
  * the one after": every branch of a Shalimar 'if' is exclusive. So this

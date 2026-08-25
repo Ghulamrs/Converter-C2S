@@ -33,10 +33,9 @@ const char *Options::usage() {
         "  without meaning quite what the original did:\n"
         "\n"
         "  --allow-short-circuit   '&&' and '||' as nested ifs\n"
-        "  --allow-fall-through    a falling switch case as a flag and a chain\n"
         "  --allow-char-arithmetic int() around a char reaching an operator\n"
         "  --allow-narrowing       long, unsigned and float narrowed to int/real\n"
-        "  --pragmatic             all four of the above\n"
+        "  --pragmatic             all three of the above\n"
         "\n"
         "  --list-codes         print the diagnostic catalogue and stop\n"
         "  --version            print the version and stop\n"
@@ -87,7 +86,6 @@ bool Options::parse(int argc, char **argv, Diagnostics &diagnostics) {
         if (arg == "--canon")        { canonicalise_ = true; continue; }
 
         if (arg == "--allow-short-circuit")   { permissions_.allowShortCircuit(); continue; }
-        if (arg == "--allow-fall-through")    { permissions_.allowFallThrough(); continue; }
         if (arg == "--allow-char-arithmetic") { permissions_.allowCharArithmetic(); continue; }
         if (arg == "--allow-narrowing")       { permissions_.allowNarrowing(); continue; }
         if (arg == "--pragmatic")             { permissions_.allowEverything(); continue; }

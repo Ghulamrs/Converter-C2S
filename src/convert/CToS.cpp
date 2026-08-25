@@ -1033,6 +1033,45 @@ bool containsLoopJump(CStmt &node, bool continueOnly) {
     return finder.found;
 }
 
+// Does any case of this switch run on into the next? Asked twice, and it has
+// to give the same answer both times: once by the hoist walk, which mints the
+// two temporaries the falling lowering needs and is the only pass that can
+// still reach the top of the function, and once by the lowering itself. The
+// arms are read here exactly as lowerSwitch reads them - grouped labels
+// collapse into one arm, and a case ends itself with break, return or
+// continue.
+bool switchFallsThrough(CSwitch &node) {
+    CCompound *body = dynamic_cast<CCompound *>(&node.body());
+    if (body == nullptr) return false;
+
+    std::vector<std::vector<CStmt *> > arms;
+    std::vector<CStmtPtr> &items = body->body();
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        CStmt *item = items[i].get();
+        if (CCase *label = dynamic_cast<CCase *>(item)) {
+            CStmt *inner = &label->body();
+            while (CCase *grouped = dynamic_cast<CCase *>(inner)) inner = &grouped->body();
+            arms.push_back(std::vector<CStmt *>());
+            if (dynamic_cast<CEmpty *>(inner) == nullptr) arms.back().push_back(inner);
+            continue;
+        }
+        if (arms.empty()) continue;
+        arms.back().push_back(item);
+    }
+
+    for (std::size_t i = 0; i + 1 < arms.size(); ++i) {
+        const std::vector<CStmt *> &arm = arms[i];
+        if (arm.empty()) return true;
+        CStmt *last = arm.back();
+        if (dynamic_cast<CBreak *>(last) == nullptr &&
+            dynamic_cast<CReturn *>(last) == nullptr &&
+            dynamic_cast<CContinue *>(last) == nullptr) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool containsSwitchBreak(CStmt &node) {
     FindsLoopJump finder;
     finder.findBreakOnly = true;
@@ -1449,7 +1488,25 @@ void CToS::lowerSwitch(CSwitch &node) {
     shalimar::Block wrapped;
     if (needsWrapper) block_ = &wrapped;
 
-    if (anyFallsThrough && permissions_.fallThrough()) {
+    // A case running on into the next is lowered, not refused. Unlike the
+    // other rewrites behind permissions this one changes nothing about what
+    // the program means - the entry index and the done flag reproduce C's
+    // rule exactly, default in the middle included. What it costs is the
+    // if/elseif chain's readability, and only for a switch that falls
+    // through; that is a price, not a risk, so it is not asked about.
+    if (anyFallsThrough && names.entry.empty()) {
+        // The hoist walk decides whether to mint the two temporaries, using
+        // switchFallsThrough. If it said no and the arms say yes the two have
+        // drifted apart, and the honest answer is a refusal rather than a
+        // reference to a name that was never declared.
+        markBeyond(node.offset(),
+                   "a switch this converter read two different ways - report it");
+        loopDepth_ = outerLoopDepth;
+        block_ = outerBlock;
+        return;
+    }
+
+    if (anyFallsThrough) {
         lowerFallingSwitchArms(node, names, arms, terminates, needsWrapper);
         loopDepth_ = outerLoopDepth;
         closeSwitchWrapper(node, needsWrapper, outerBlock, wrapped);
@@ -1467,7 +1524,7 @@ void CToS::lowerSwitch(CSwitch &node) {
         if (!terminates[i] && i + 1 < arms.size()) {
             markBeyond(arm.offset,
                        "a case that falls through into the next - materialise "
-                       "it by hand, or pass --allow-fall-through");
+                       "it by hand");
             continue;
         }
 
@@ -2050,7 +2107,7 @@ void CToS::hoistDeclarations(CStmt &node, shalimar::Block *top) {
         top->push_back(shalimar::StmtPtr(new shalimar::Declare(
             shalimar::Type::intType(), names.selector, nullptr,
             lineOf(sw->offset()))));
-        if (permissions_.fallThrough()) {
+        if (switchFallsThrough(*sw)) {
             std::snprintf(temp, sizeof temp, "sw_%d_entry", tempCount_);
             names.entry = rename(temp);
             std::snprintf(temp, sizeof temp, "sw_%d_done", tempCount_);
