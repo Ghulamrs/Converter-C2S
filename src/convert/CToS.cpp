@@ -995,9 +995,10 @@ class FindsLoopJump : public CVisitor {
 public:
     bool found = false;
     bool findContinueOnly = false;
+    bool findBreakOnly = false;
 
     void visit(CBreak &) override { if (!findContinueOnly) found = true; }
-    void visit(CContinue &) override { found = true; }
+    void visit(CContinue &) override { if (!findBreakOnly) found = true; }
     void visit(CWhile &) override {}       // a nested loop shields its jumps
     void visit(CDoWhile &) override {}
     void visit(CFor &) override {}
@@ -1048,6 +1049,18 @@ public:
 bool containsLoopJump(CStmt &node, bool continueOnly) {
     FindsLoopJump finder;
     finder.findContinueOnly = continueOnly;
+    node.accept(finder);
+    return finder.found;
+}
+
+// A 'break' inside this statement that C would bind to the switch the
+// statement belongs to: one not shielded by a loop or a further switch of
+// its own. The trailing break of a case has already been taken off the
+// body by the time this is asked, so what it finds is a break that leaves
+// from somewhere other than the end.
+bool containsSwitchBreak(CStmt &node) {
+    FindsLoopJump finder;
+    finder.findBreakOnly = true;
     node.accept(finder);
     return finder.found;
 }
@@ -1291,18 +1304,9 @@ void CToS::visit(CFor &node) {
 // division anywhere in a condition this builds.
 void CToS::lowerFallingSwitchArms(CSwitch &node, const SwitchTemps &names,
                                   std::vector<SwitchArm> &arms,
-                                  const std::vector<bool> &terminates) {
+                                  const std::vector<bool> &terminates,
+                                  bool wrapped) {
     const int line = lineOf(node.offset());
-    // C's 'break' binds to the nearest enclosing switch OR loop, and here
-    // that is this switch - so for the length of these bodies, any loop
-    // outside is out of reach. Without this, a break inside an if inside a
-    // case, with the switch inside a loop, saw loopDepth_ still counting
-    // that loop and emitted a Shalimar 'break' - which left the LOOP. The
-    // program compiled, ran, and stopped iterating early; nothing was
-    // marked and c2s exited 0. A loop written inside an arm puts its own
-    // depth back on top, so a break belonging to that still converts.
-    const int outerLoopDepth = loopDepth_;
-    loopDepth_ = 0;
 
     const int count = static_cast<int>(arms.size());
 
@@ -1385,7 +1389,11 @@ void CToS::lowerFallingSwitchArms(CSwitch &node, const SwitchTemps &names,
             // caller; one that is still here is inside an if, and it means
             // "leave the switch from here" - which is a jump out of the
             // middle of this arm's body, and there is nothing to jump to.
-            if (dynamic_cast<CBreak *>(arm.body[k]) != nullptr) {
+            // A break still here after the tail one was dropped leaves the
+            // switch from the middle. With a wrapper around this switch
+            // there is somewhere for it to go and statement() emits it;
+            // without one there is not.
+            if (!wrapped && dynamic_cast<CBreak *>(arm.body[k]) != nullptr) {
                 markBeyond(arm.body[k]->offset(),
                            "a break inside the case but not at its end");
                 continue;
@@ -1418,7 +1426,6 @@ void CToS::lowerFallingSwitchArms(CSwitch &node, const SwitchTemps &names,
         block_->push_back(shalimar::StmtPtr(guard.release()));
     }
 
-    loopDepth_ = outerLoopDepth;
 }
 
 void CToS::lowerSwitch(CSwitch &node) {
@@ -1500,14 +1507,83 @@ void CToS::lowerSwitch(CSwitch &node) {
             arm.body.pop_back();
         }
         if (!arm.body.empty() &&
-            dynamic_cast<CReturn *>(arm.body.back()) != nullptr) {
-            terminates[i] = true;    // a return ends the case as surely
+            (dynamic_cast<CReturn *>(arm.body.back()) != nullptr ||
+             dynamic_cast<CContinue *>(arm.body.back()) != nullptr)) {
+            // A return ends the case as surely as a break does, and so
+            // does a continue - it leaves the switch and the enclosing
+            // turn together, so nothing below it in the switch runs and
+            // it is not fall-through.
+            terminates[i] = true;
         }
         if (!terminates[i] && i + 1 < arms.size()) anyFallsThrough = true;
     }
 
+    // Does any arm leave the switch from somewhere other than its end? The
+    // trailing break of each case has already been taken off above, so what
+    // this finds is a break inside an if, or one followed by more
+    // statements - the shape C spells 'stop here' and Shalimar has no
+    // statement for.
+    //
+    // It has no statement for it, but it has a shape. A switch is a block
+    // entered once and left at a point of its choosing, and so is a loop
+    // that always ends its first turn:
+    //
+    //     while 1 {
+    //       <the arms>
+    //       break
+    //     }
+    //
+    // Every break in a case then binds to that wrapper, which contains
+    // exactly this switch and nothing else - so leaving the wrapper and
+    // leaving the switch are the same jump, and an enclosing loop never
+    // sees it. A loop written inside an arm still shields its own breaks,
+    // being nearer.
+    //
+    // The wrapper is only built where it is needed, because it costs a
+    // level of indentation and an unconditional loop in the output, and
+    // most switches do not need it.
+    bool needsWrapper = false;
+    for (std::size_t i = 0; i < arms.size() && !needsWrapper; ++i) {
+        for (std::size_t k = 0; k < arms[i].body.size(); ++k) {
+            if (containsSwitchBreak(*arms[i].body[k])) { needsWrapper = true; break; }
+        }
+    }
+
+    // The wrapper's one cost, and it is the mirror of the fault that made
+    // it necessary. A 'continue' written in a case belongs to a loop
+    // OUTSIDE the switch, and Shalimar would bind it to the wrapper -
+    // which would run the switch again instead of ending the outer turn.
+    // A continue inside a loop written within an arm is that loop's and is
+    // not affected.
+    if (needsWrapper) {
+        for (std::size_t i = 0; i < arms.size(); ++i) {
+            for (std::size_t k = 0; k < arms[i].body.size(); ++k) {
+                if (containsLoopJump(*arms[i].body[k], true)) {
+                    markBeyond(arms[i].body[k]->offset(),
+                               "a continue in a case that also breaks out of "
+                               "the switch - the two want different loops");
+                    needsWrapper = false;
+                }
+            }
+        }
+    }
+
+    // For the length of the arm bodies, any loop outside this switch is out
+    // of reach: C binds a break to the nearest enclosing switch OR loop,
+    // and inside a case that is the switch. Where a wrapper was built the
+    // depth is 1, because the wrapper is a real Shalimar loop and a break
+    // belongs to it; where none was, it is 0 and a break is refused.
+    const int outerLoopDepth = loopDepth_;
+    loopDepth_ = needsWrapper ? 1 : 0;
+
+    shalimar::Block *outerBlock = block_;
+    shalimar::Block wrapped;
+    if (needsWrapper) block_ = &wrapped;
+
     if (anyFallsThrough && permissions_.fallThrough()) {
-        lowerFallingSwitchArms(node, names, arms, terminates);
+        lowerFallingSwitchArms(node, names, arms, terminates, needsWrapper);
+        loopDepth_ = outerLoopDepth;
+        closeSwitchWrapper(node, needsWrapper, outerBlock, wrapped);
         return;
     }
 
@@ -1520,16 +1596,6 @@ void CToS::lowerSwitch(CSwitch &node) {
     bool haveDefault = false;
     bool haveBranch = false;
 
-    // C's 'break' binds to the nearest enclosing switch OR loop, and here
-    // that is this switch - so for the length of these bodies, any loop
-    // outside is out of reach. Without this, a break inside an if inside a
-    // case, with the switch inside a loop, saw loopDepth_ still counting
-    // that loop and emitted a Shalimar 'break' - which left the LOOP. The
-    // program compiled, ran, and stopped iterating early; nothing was
-    // marked and c2s exited 0. A loop written inside an arm puts its own
-    // depth back on top, so a break belonging to that still converts.
-    const int outerLoopDepth = loopDepth_;
-    loopDepth_ = 0;
 
     for (std::size_t i = 0; i < arms.size(); ++i) {
         SwitchArm &arm = arms[i];
@@ -1545,7 +1611,11 @@ void CToS::lowerSwitch(CSwitch &node) {
         shalimar::Block *saved = block_;
         block_ = &armBody;
         for (std::size_t k = 0; k < arm.body.size(); ++k) {
-            if (dynamic_cast<CBreak *>(arm.body[k]) != nullptr) {
+            // A break still here after the tail one was dropped leaves the
+            // switch from the middle. With a wrapper around this switch
+            // there is somewhere for it to go and statement() emits it;
+            // without one there is not.
+            if (!needsWrapper && dynamic_cast<CBreak *>(arm.body[k]) != nullptr) {
                 markBeyond(arm.body[k]->offset(),
                            "a break inside the case but not at its end");
                 continue;
@@ -1575,12 +1645,27 @@ void CToS::lowerSwitch(CSwitch &node) {
         haveBranch = true;
     }
 
+
     loopDepth_ = outerLoopDepth;
 
     if (haveDefault) chain->setElse(std::move(defaultBody));
     if (haveBranch) {
         block_->push_back(shalimar::StmtPtr(chain.release()));
     }
+    closeSwitchWrapper(node, needsWrapper, outerBlock, wrapped);
+}
+
+// Put the arms inside 'while 1 { ... break }' and that in the block the
+// switch stands in. The trailing break is what makes it one turn.
+void CToS::closeSwitchWrapper(CSwitch &node, bool needsWrapper,
+                              shalimar::Block *outerBlock,
+                              shalimar::Block &wrapped) {
+    if (!needsWrapper) return;
+    const int line = lineOf(node.offset());
+    block_ = outerBlock;
+    wrapped.push_back(shalimar::StmtPtr(new shalimar::Break(line)));
+    block_->push_back(shalimar::StmtPtr(
+        new shalimar::While(sInt(1), std::move(wrapped), line)));
 }
 
 void CToS::visit(CSwitch &node) {

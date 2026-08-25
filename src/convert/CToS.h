@@ -187,7 +187,15 @@ private:
     // say 'and then the one after' - for an entry index and a done flag.
     void lowerFallingSwitchArms(CSwitch &node, const SwitchTemps &names,
                                 std::vector<SwitchArm> &arms,
-                                const std::vector<bool> &terminates);
+                                const std::vector<bool> &terminates,
+                                bool wrapped);
+
+    // A switch that some arm leaves from the middle is wrapped in a loop
+    // that always ends its first turn, so that C's 'break' has a Shalimar
+    // loop of its own to leave - see lowerSwitch.
+    void closeSwitchWrapper(CSwitch &node, bool needsWrapper,
+                            shalimar::Block *outerBlock,
+                            shalimar::Block &wrapped);
     bool lowerTernaryReturn(CTernary &top, std::size_t offset,
                             shalimar::Block *into);
     bool returnArm(CExpr &value, std::size_t offset, shalimar::Block *into);
