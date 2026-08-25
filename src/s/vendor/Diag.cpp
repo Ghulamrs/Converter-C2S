@@ -5,9 +5,7 @@ namespace shalimar {
 std::string Message::formatted(const std::vector<std::string>& units) const {
     std::string out = severity == Severity::Error ? "Error: " : "Warning: ";
     if (line > 0) {
-        // The program's own file is not named. Every single-file program
-        // therefore prints exactly what the app prints, and a name appears
-        // only where there is a second file to tell it from.
+
         if (unit > 0 && static_cast<size_t>(unit) < units.size()) {
             out += units[static_cast<size_t>(unit)];
             out += " ";
@@ -48,4 +46,4 @@ void Diagnostics::writeTo(std::string& out) const {
     }
 }
 
-}  // namespace shalimar
+}

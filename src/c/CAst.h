@@ -1,25 +1,6 @@
 #ifndef C2S_C_CAST_H
 #define C2S_C_CAST_H
 
-// The C89 syntax tree - source-faithful, unlike Compiler-C's.
-//
-// Compiler-C's tree is a code-generation tree: declarations are erased,
-// 'a[i]' is already pointer arithmetic, enum and sizeof are folded, and an
-// implicit promotion is indistinguishable from a written cast. All of that
-// is right for emitting assembly and wrong for translating source, which is
-// why this tree exists. Every node here holds what was written: a subscript
-// is a subscript, a declaration is a declaration, a hex literal keeps its
-// spelling, and nothing is folded.
-//
-// Nodes are polymorphic and walked by double dispatch, the same discipline
-// as Compiler-S's tree: a pass derives from CVisitor, and a new node makes
-// every pass that has not handled it a build error.
-//
-// Ownership is a strict unique_ptr tree. Types are owned where they appear -
-// a declarator owns its type, a cast owns its - and are cloned rather than
-// shared, because a source type is small and an interning table would tie
-// every tree to a factory's lifetime.
-
 #include <cstddef>
 #include <memory>
 #include <string>
@@ -103,9 +84,6 @@ public:
     virtual ~CNode() = default;
     virtual void accept(CVisitor &v) = 0;
 
-    // A byte offset into the scanned text; Source::locate turns it into the
-    // file, line and column the user would name. Every node carries one,
-    // because a conversion error must be able to point at an expression.
     std::size_t offset() const { return offset_; }
     void setOffset(std::size_t offset) { offset_ = offset; }
 
@@ -116,26 +94,19 @@ private:
     std::size_t offset_ = 0;
 };
 
-// --------------------------------------------------------------------- types
-
-// One C89 type, as written. Qualifiers ride on the type they qualify, and
-// the base kinds keep their sign and length adjectives rather than resolving
-// them, so 'unsigned long' can be printed back and refused by name.
 class CType {
 public:
     enum class Kind {
-        Void, Char, Int, Float, Double,   // base kinds; adjectives below
+        Void, Char, Int, Float, Double,
         Pointer, Array, Function,
-        Struct, Union, Enum,              // tagged; members may be absent
-        Named                             // a typedef name in use
+        Struct, Union, Enum,
+        Named
     };
 
     explicit CType(Kind kind) : kind_(kind) {}
 
     Kind kind() const { return kind_; }
 
-    // Adjectives on a base kind. 'signed' is recorded so 'signed char' can
-    // be told from 'char', which C89 says are distinct types.
     bool isUnsigned() const { return isUnsigned_; }
     bool isSignedExplicit() const { return isSignedExplicit_; }
     bool isShort() const { return isShort_; }
@@ -150,24 +121,17 @@ public:
     void setConst() { isConst_ = true; }
     void setVolatile() { isVolatile_ = true; }
 
-    // Pointer and array element, function return.
     const CType *base() const { return base_.get(); }
     CType *base() { return base_.get(); }
     void setBase(std::unique_ptr<CType> base) { base_ = std::move(base); }
     std::unique_ptr<CType> takeBase() { return std::move(base_); }
 
-    // Array length as written, or null for '[]'. An expression, unfolded:
-    // 'int a[N * 2]' keeps the multiplication.
-    class CExprHolder;                 // defined after CExpr below
+    class CExprHolder;
     bool hasLength() const { return lengthText_ != nullptr; }
 
-    // The length expression is held opaquely to keep CType independent of
-    // the expression classes' definitions; accessors are in CAst.cpp.
     void setLength(std::unique_ptr<CNode> length) { lengthText_ = std::move(length); }
     CNode *length() const { return lengthText_.get(); }
 
-    // Function parameters. A parameter's name lives beside its type here,
-    // because a definition needs it and a prototype may have it.
     struct Param {
         std::string name;
         std::unique_ptr<CType> type;
@@ -176,19 +140,17 @@ public:
     const std::vector<Param> &params() const { return params_; }
     bool isVariadic() const { return isVariadic_; }
     void setVariadic() { isVariadic_ = true; }
-    // 'f(void)' rather than 'f()' - an empty prototype and an empty
-    // parameter list are different declarations in C89.
+
     bool isProtoVoid() const { return isProtoVoid_; }
     void setProtoVoid() { isProtoVoid_ = true; }
 
-    // Tag and members for struct/union/enum; the name for Named.
     const std::string &tag() const { return tag_; }
     void setTag(std::string tag) { tag_ = std::move(tag); }
 
     struct Member {
         std::string name;
         std::unique_ptr<CType> type;
-        std::unique_ptr<CNode> bitWidth;   // null when not a bitfield
+        std::unique_ptr<CNode> bitWidth;
     };
     std::vector<Member> &members() { return members_; }
     const std::vector<Member> &members() const { return members_; }
@@ -197,15 +159,13 @@ public:
 
     struct Enumerator {
         std::string name;
-        std::unique_ptr<CNode> value;      // null when the value is implied
+        std::unique_ptr<CNode> value;
     };
     std::vector<Enumerator> &enumerators() { return enumerators_; }
     const std::vector<Enumerator> &enumerators() const { return enumerators_; }
 
     std::unique_ptr<CType> clone() const;
 
-    // The written spelling, for diagnostics: "unsigned long", "char *",
-    // "struct point", "int [10]".
     std::string describe() const;
 
 private:
@@ -228,8 +188,6 @@ private:
 };
 
 using CTypePtr = std::unique_ptr<CType>;
-
-// --------------------------------------------------------------- expressions
 
 class CExpr : public CNode {
 protected:
@@ -299,7 +257,6 @@ public:
     CStringLit(std::string text, std::string spelling)
         : text_(std::move(text)), spelling_(std::move(spelling)) {}
 
-    // The decoded characters; the spelling keeps the escapes as written.
     const std::string &text() const { return text_; }
     const std::string &spelling() const { return spelling_; }
 
@@ -322,8 +279,6 @@ private:
     std::string name_;
 };
 
-// '&x', '*p', '+x', '-x', '~x', '!x', '++x', '--x', 'x++', 'x--'. The op is
-// its source spelling; prefix() separates '++x' from 'x++'.
 class CUnary : public CExpr {
 public:
     CUnary(std::string op, bool prefix, CExprPtr operand)
@@ -361,9 +316,6 @@ private:
     CExprPtr rhs_;
 };
 
-// '=', '+=', '-=', '*=', '/=', '%=', '<<=', '>>=', '&=', '^=', '|='.
-// Separate from CBinary because assignment associates the other way and is
-// the thing several conversion rules have to find.
 class CAssign : public CExpr {
 public:
     CAssign(std::string op, CExprPtr target, CExprPtr value)
@@ -432,7 +384,6 @@ private:
     CExprPtr index_;
 };
 
-// 'a.b' and 'p->b', told apart by arrow().
 class CMember : public CExpr {
 public:
     CMember(CExprPtr object, std::string name, bool arrow)
@@ -450,8 +401,6 @@ private:
     bool arrow_;
 };
 
-// A written cast, '(T)x'. There are no implicit conversions in this tree -
-// it is the source, and the source did not write them.
 class CCast : public CExpr {
 public:
     CCast(CTypePtr type, CExprPtr operand)
@@ -468,7 +417,6 @@ private:
     CExprPtr operand_;
 };
 
-// 'sizeof expr' or 'sizeof(T)'; exactly one of the two is set.
 class CSizeof : public CExpr {
 public:
     explicit CSizeof(CExprPtr operand) : operand_(std::move(operand)) {}
@@ -500,8 +448,6 @@ private:
     CExprPtr right_;
 };
 
-// --------------------------------------------------------------- statements
-
 class CStmt : public CNode {
 protected:
     CStmt() = default;
@@ -509,8 +455,6 @@ protected:
 
 using CStmtPtr = std::unique_ptr<CStmt>;
 
-// An initialiser: an expression, or a braced list of initialisers. The list
-// is positional, as C89's are - designators are C99.
 class CInit {
 public:
     CInit() = default;
@@ -528,9 +472,6 @@ private:
     std::vector<CInit> items_;
 };
 
-// One declaration: a storage class, then one or more declarators each with
-// its complete type and optional initialiser. 'int a, *b, c[3];' is one
-// CDeclaration with three declarators whose types differ.
 class CDeclaration : public CNode {
 public:
     enum class Storage { None, Typedef, Extern, Static, Auto, Register };
@@ -538,7 +479,7 @@ public:
     struct Declarator {
         std::string name;
         CTypePtr type;
-        std::unique_ptr<CInit> init;   // null when none
+        std::unique_ptr<CInit> init;
         std::size_t offset = 0;
     };
 
@@ -549,12 +490,10 @@ public:
     const std::vector<Declarator> &declarators() const { return declarators_; }
     void add(Declarator declarator) { declarators_.push_back(std::move(declarator)); }
 
-    // A declaration that is only a struct/union/enum definition -
-    // 'struct point { ... };' - has no declarators; the shape lives here.
     const CType *bareType() const { return bareType_.get(); }
     void setBareType(CTypePtr type) { bareType_ = std::move(type); }
 
-    void accept(CVisitor &) override {}    // visited through CDeclStmt or the program walk
+    void accept(CVisitor &) override {}
 
 private:
     Storage storage_ = Storage::None;
@@ -562,7 +501,6 @@ private:
     CTypePtr bareType_;
 };
 
-// A declaration standing where a statement does, at the top of a block.
 class CDeclStmt : public CStmt {
 public:
     explicit CDeclStmt(std::unique_ptr<CDeclaration> decl) : decl_(std::move(decl)) {}
@@ -651,16 +589,13 @@ private:
     CExprPtr cond_;
 };
 
-// 'for (init; cond; step) body'. C89's init is an expression or nothing;
-// a declaration there is C99, which cc1 accepts as an extension, so the init
-// may also be a declaration here and the conversion pass decides its fate.
 class CFor : public CStmt {
 public:
     CFor(CStmtPtr init, CExprPtr cond, CExprPtr step, CStmtPtr body)
         : init_(std::move(init)), cond_(std::move(cond)),
           step_(std::move(step)), body_(std::move(body)) {}
 
-    CStmt *init() { return init_.get(); }        // CExprStmt, CDeclStmt or null
+    CStmt *init() { return init_.get(); }
     CExpr *cond() { return cond_.get(); }
     CExpr *step() { return step_.get(); }
     CStmt &body() { return *body_; }
@@ -689,9 +624,6 @@ private:
     CStmtPtr body_;
 };
 
-// 'case e:' or 'default:', labelling the statement after it. The labelled
-// statement is owned, exactly as Compiler-C owns it, and fall-through is the
-// labelled statement simply being followed by the next in the block.
 class CCase : public CStmt {
 public:
     CCase(CExprPtr value, CStmtPtr body)
@@ -758,11 +690,6 @@ private:
     CStmtPtr body_;
 };
 
-// A construct of the other language with no expression in this one. It
-// prints as a comment block tagged #BEYOND SHALIMAR, quoting the original
-// source, so the gap is visible exactly where it belongs and the rest of the
-// program still comes through. Both converters use the same marker - that is
-// the agreed symmetry between the two code generators.
 class CBeyond : public CStmt {
 public:
     CBeyond(std::string reason, std::vector<std::string> sourceLines)
@@ -778,8 +705,6 @@ private:
     std::vector<std::string> lines_;
 };
 
-// ------------------------------------------------------------------ program
-
 class CFunctionDef {
 public:
     CFunctionDef(std::string name, CTypePtr type, std::unique_ptr<CCompound> body,
@@ -788,7 +713,7 @@ public:
           isStatic_(isStatic) {}
 
     const std::string &name() const { return name_; }
-    // The function type: return type in base(), parameters in params().
+
     CType &type() { return *type_; }
     const CType &type() const { return *type_; }
     CCompound &body() { return *body_; }
@@ -805,22 +730,11 @@ private:
     std::size_t offset_ = 0;
 };
 
-// The translation unit, in source order. An entry is a function definition
-// or a declaration; order is kept because it is meaning in C too.
 class CProgram {
 public:
     struct Entry {
         bool isFunction;
 
-        // A refusal that stood at file scope: neither a function nor a
-        // declaration, but a comment quoting what could not be carried. It
-        // is here because a marker counted has to be a marker shown - the
-        // run says how many constructs it refused, and a reader looking for
-        // that many must find them.
-        //
-        // Only the Shalimar-to-C direction makes one. A CProgram built by
-        // CParser is the C source as written and never holds a marker, which
-        // is why the C-to-Shalimar walk over order() has no branch for this.
         bool isMarker;
         std::size_t index;
     };
@@ -850,6 +764,6 @@ private:
     std::vector<Entry> order_;
 };
 
-}  // namespace c2s
+}
 
 #endif

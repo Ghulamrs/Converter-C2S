@@ -1,15 +1,4 @@
-// The lexer.
-//
-// Hand-written rather than table-driven, but the order of the rules below is
-// the order of the app's pattern table and must stay that way. Two places
-// depend on it:
-//
-//   - the number rule sits above the dot rule, so the dot in '1.5' is eaten
-//     as part of the numeral and only a dot that cannot start a number
-//     reaches the dot rule. That is exactly the dot of 'A.row'. Moving the
-//     dot up would break every real literal in the language.
-//   - the two-character comparisons sit above the single-character operators,
-//     or '<=' would be read as '<' followed by an equality comparison.
+
 #include "Token.h"
 
 #include <cerrno>
@@ -21,12 +10,6 @@ namespace {
 
 bool isAsciiDigit(char c) { return c >= '0' && c <= '9'; }
 
-// ASCII only, deliberately. Every Unicode letter would let Cyrillic 'х'
-// (U+0445) and Latin 'x' (U+0078) - the same glyph on screen - be different
-// identifiers, so 'хn : y - 4' would assign to a variable no 'xn' in the
-// program ever reads. That is not hypothetical; it is how a camera-scanned
-// program failed. A non-ASCII character is an error naming its code point,
-// which is the only way to make the difference visible on screen.
 bool isAsciiLetter(char c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 }
@@ -43,9 +26,6 @@ std::string lowercased(const std::string& s) {
     return out;
 }
 
-// Decode one UTF-8 scalar so the error can name it. An ill-formed byte is
-// reported as itself: there is no code point to name, and inventing one would
-// be worse than quoting the byte that is actually there.
 struct Scalar {
     unsigned value;
     size_t length;
@@ -94,7 +74,7 @@ public:
     LexResult run() {
         while (i_ < src_.size()) {
             tokenLine_ = line_;
-            if (!step()) return result_;      // step() filled in the error
+            if (!step()) return result_;
         }
         return result_;
     }
@@ -132,11 +112,10 @@ private:
         result_.tokens.push_back(t);
     }
 
-    // Returns false only when an error has been recorded.
     bool step() {
         char c = cur();
 
-        if (c == '/' && next() == '/') {                  // comment to end of line
+        if (c == '/' && next() == '/') {
             while (i_ < src_.size() && src_[i_] != '\n') ++i_;
             return true;
         }
@@ -151,11 +130,6 @@ private:
         return punctuation();
     }
 
-    // A literal must be closed on the line it opens. Both halves of that earn
-    // their place: with the closing quote optional a stray quote swallowed the
-    // rest of the file, and with the body able to cross a newline the opening
-    // quote reached forward to the next quote anywhere below - turning a
-    // program into a string and reporting the failure on a line that was fine.
     bool string() {
         size_t j = i_ + 1;
         while (j < src_.size() && src_[j] != '"' && src_[j] != '\n') ++j;
@@ -175,7 +149,6 @@ private:
         std::string raw = src_.substr(i_, j - i_);
         i_ = j;
 
-        // Keywords are matched case-insensitively and can never be identifiers.
         const std::string key = lowercased(raw);
         if (key == "if")       { push(Tok::If);       return true; }
         if (key == "elseif")   { push(Tok::ElseIf);   return true; }
@@ -195,17 +168,11 @@ private:
         Token t;
         t.kind = Tok::Identifier;
         t.line = tokenLine_;
-        t.text = raw;                                   // case-sensitive
+        t.text = raw;
         result_.tokens.push_back(t);
         return true;
     }
 
-    // The scan is looser than the grammar on purpose: any run of digits and
-    // dots, and an exponent whose digits may be absent. So '1.2.3', '1e' and
-    // '1e-' all arrive whole at the conversion, where they are reported as
-    // malformed. Scanning strictly would leave '1e' to split into the number 1
-    // and an identifier 'e', desyncing every token after it and surfacing as a
-    // parse error pointing somewhere else. The conversion is what arbitrates.
     bool number() {
         size_t j = i_;
         while (j < src_.size() && (isAsciiDigit(src_[j]) || src_[j] == '.')) ++j;
@@ -265,7 +232,6 @@ private:
         if (c == '?' && d == '?') { i_ += 2; push(Tok::PrintInline); return true; }
         if (c == '?')             { i_ += 1; push(Tok::PrintLine);   return true; }
 
-        // '!' is not a token on its own - only the first half of '!='.
         if (c == '!') return fail("'!' is not a command - use '?\?' or '!='");
 
         switch (c) {
@@ -295,13 +261,13 @@ private:
     }
 };
 
-}  // namespace
+}
 
 LexResult tokenize(const std::string& source) {
     return Lexer(source).run();
 }
 
-}  // namespace shalimar
+}
 
 namespace shalimar {
 
@@ -344,4 +310,4 @@ std::string spellingOf(const Token& token) {
     return "";
 }
 
-}  // namespace shalimar
+}

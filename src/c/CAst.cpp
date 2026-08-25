@@ -4,15 +4,7 @@ namespace c2s {
 
 namespace {
 
-// A CNode held by a type is always a CExpr in practice; cloning it means
-// re-walking, which types do not need - a cloned type keeps the same length
-// node text through describe(), and the printer prints from the original
-// tree. For the one case a clone's length matters (S-to-C construction),
-// lengths are built fresh. So a clone carries the length pointer as null and
-// records that a length existed through lengthWasKnown in describe()'s
-// bracket. This is deliberate: sharing a unique_ptr is not possible and
-// duplicating expression trees inside types buys nothing the converter uses.
-}  // namespace
+}
 
 std::unique_ptr<CType> CType::clone() const {
     std::unique_ptr<CType> copy(new CType(kind_));
@@ -44,7 +36,7 @@ std::unique_ptr<CType> CType::clone() const {
         e.name = enumerators_[i].name;
         copy->enumerators_.push_back(std::move(e));
     }
-    // The length expression is not cloned - see the note above.
+
     return copy;
 }
 
@@ -92,4 +84,4 @@ std::string CType::describe() const {
     return "?";
 }
 
-}  // namespace c2s
+}

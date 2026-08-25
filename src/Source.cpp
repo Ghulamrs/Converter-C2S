@@ -31,11 +31,6 @@ Source Source::fromFile(const std::string &path) {
 
     std::string text = buffer.str();
 
-    // A file that does not end in a newline is normalised to one. Both
-    // grammars this converter reads are line-sensitive somewhere - Shalimar's
-    // print and return statements, C's line comments - and a last line with
-    // no terminator is the sort of thing that is right in the parser and
-    // wrong in the printer.
     if (!text.empty() && text[text.size() - 1] != '\n') text += '\n';
 
     return Source(path, text);
@@ -62,7 +57,6 @@ std::string Source::line(int lineNo) const {
     std::size_t end = begin;
     while (end < text_.size() && text_[end] != '\n') ++end;
 
-    // A CRLF file must not leave the carriage return in a quoted line.
     if (end > begin && text_[end - 1] == '\r') --end;
 
     return text_.substr(begin, end - begin);
@@ -71,7 +65,6 @@ std::string Source::line(int lineNo) const {
 Location Source::locate(std::size_t offset) const {
     if (offset > text_.size()) offset = text_.size();
 
-    // Binary search for the last line starting at or before the offset.
     std::size_t low = 0;
     std::size_t high = lineStarts_.size() - 1;
     while (low < high) {
@@ -88,4 +81,4 @@ Location Source::locate(std::size_t offset) const {
     return Location(name_, lineNo, column);
 }
 
-}  // namespace c2s
+}

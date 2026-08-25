@@ -9,10 +9,6 @@ namespace {
 
 const CToken kEndToken;
 
-// C's binary operator precedence, tightest first as the usual table has it;
-// the climb in binary() works from loosest, so the numbers only need order.
-// Assignment and the conditional are handled by their own methods - they
-// associate rightward - and the comma by expression().
 int precedenceOf(const std::string &op) {
     if (op == "*" || op == "/" || op == "%") return 10;
     if (op == "+" || op == "-") return 9;
@@ -33,15 +29,13 @@ bool isAssignOp(const std::string &op) {
            op == "|=";
 }
 
-}  // namespace
+}
 
 CParser::CParser(const Source &source, std::vector<CToken> tokens,
                  Diagnostics &diagnostics)
     : source_(source), tokens_(std::move(tokens)), diagnostics_(diagnostics) {
     typedefScopes_.push_back(std::set<std::string>());
 }
-
-// ---------------------------------------------------------------- plumbing
 
 const CToken &CParser::current() const {
     return index_ < tokens_.size() ? tokens_[index_] : kEndToken;
@@ -81,7 +75,7 @@ bool CParser::expect(const char *text, const char *where) {
 }
 
 void CParser::fail(const std::string &message) {
-    if (failed_) return;               // the first error is the real one
+    if (failed_) return;
     failed_ = true;
     diagnostics_.report(Severity::SyntaxError, source_,
                         source_.locate(current().offset), "C1000", message);
@@ -110,11 +104,9 @@ bool CParser::atTypeStart() const {
     return token.kind == CTokenKind::Identifier && isTypedefName(token.text);
 }
 
-// ------------------------------------------------------------ declarations
-
 CTypePtr CParser::structOrUnion() {
     const bool isUnion = atKeyword("union");
-    advance();                          // 'struct' or 'union'
+    advance();
 
     CTypePtr type(new CType(isUnion ? CType::Kind::Union : CType::Kind::Struct));
 
@@ -132,7 +124,7 @@ CTypePtr CParser::structOrUnion() {
                 fail("expected a member declaration");
                 return type;
             }
-            // One or more declarators, each possibly a bitfield.
+
             for (;;) {
                 CType::Member member;
                 if (!at(":")) {
@@ -162,7 +154,7 @@ CTypePtr CParser::structOrUnion() {
 }
 
 CTypePtr CParser::enumSpecifier() {
-    advance();                          // 'enum'
+    advance();
 
     CTypePtr type(new CType(CType::Kind::Enum));
 
@@ -262,8 +254,7 @@ bool CParser::declarationSpecifiers(Specifiers *out, bool *sawAny) {
         }
         if (token.kind == CTokenKind::Identifier && !sawType &&
             isTypedefName(token.text)) {
-            // A typedef name is a type only when no type has been seen -
-            // 'typedef int T; T T;' declares a variable T of type T.
+
             sawType = true;
             type.reset(new CType(CType::Kind::Named));
             type->setTag(token.text);
@@ -276,7 +267,6 @@ bool CParser::declarationSpecifiers(Specifiers *out, bool *sawAny) {
 
     if (!*sawAny) return true;
 
-    // 'unsigned', 'short' and 'long' alone imply int, as C89 says.
     if (type == nullptr) {
         if (!isUnsigned && !isSignedWord && !isShort && longCount == 0) {
             fail("a declaration needs a type");
@@ -300,8 +290,7 @@ bool CParser::declarationSpecifiers(Specifiers *out, bool *sawAny) {
 }
 
 bool CParser::parameterList(CType *fn) {
-    // At the '(' already consumed. '()' is an empty prototype; '(void)' says
-    // no parameters; otherwise parameters, possibly ending ', ...'.
+
     if (accept(")")) return true;
 
     if (atKeyword("void") && peek(1).is(")")) {
@@ -336,22 +325,17 @@ bool CParser::parameterList(CType *fn) {
 
 bool CParser::directDeclarator(CTypePtr base, std::string *name, CTypePtr *out,
                                bool abstractAllowed) {
-    // A parenthesised declarator wraps whatever suffixes follow it around
-    // whatever the inside says - '(*f)(int)' is the classic. The inside is
-    // parsed against a hole, and the hole is filled once the suffixes have
-    // been wrapped around the base.
+
     if (at("(") &&
         (peek(1).is("*") || peek(1).kind == CTokenKind::Identifier ||
          peek(1).is("("))) {
         advance();
-        // Parse the inner declarator against a placeholder; remember where
-        // the placeholder sits so the suffixed base can replace it.
-        CTypePtr hole(new CType(CType::Kind::Void));  // stands in for the base
+
+        CTypePtr hole(new CType(CType::Kind::Void));
         CTypePtr inner;
         if (!declarator(std::move(hole), name, &inner, abstractAllowed)) return false;
         if (!expect(")", "to close the declarator")) return false;
 
-        // Suffixes bind to the *outer* declarator: arrays and functions.
         CTypePtr suffixed = std::move(base);
         for (;;) {
             if (at("[")) {
@@ -360,7 +344,7 @@ bool CParser::directDeclarator(CTypePtr base, std::string *name, CTypePtr *out,
                 if (!at("]")) array->setLength(std::unique_ptr<CNode>(conditional().release()));
                 if (!expect("]", "to close the array bound")) return false;
                 array->setBase(std::move(suffixed));
-                // Array suffixes nest outside-in; append at the innermost.
+
                 if (suffixed != nullptr) {}
                 suffixed = std::move(array);
                 continue;
@@ -376,8 +360,6 @@ bool CParser::directDeclarator(CTypePtr base, std::string *name, CTypePtr *out,
             break;
         }
 
-        // Replace the placeholder inside 'inner' with 'suffixed'. The
-        // placeholder is the unique Void leaf reached through base links.
         CType *walk = inner.get();
         if (walk->kind() == CType::Kind::Void && walk->base() == nullptr) {
             *out = std::move(suffixed);
@@ -402,9 +384,7 @@ bool CParser::directDeclarator(CTypePtr base, std::string *name, CTypePtr *out,
     }
 
     CTypePtr type = std::move(base);
-    // Array and function suffixes read left to right; each wraps the type
-    // built so far, and nested arrays land in declaration order: 'a[2][3]'
-    // is an array of 2 arrays of 3.
+
     std::vector<CTypePtr> arrays;
     for (;;) {
         if (at("[")) {
@@ -419,16 +399,14 @@ bool CParser::directDeclarator(CTypePtr base, std::string *name, CTypePtr *out,
             advance();
             CTypePtr fn(new CType(CType::Kind::Function));
             if (!parameterList(fn.get())) return false;
-            // A function suffix binds before any arrays gathered so far
-            // cannot exist - C89 has no arrays of functions - so arrays here
-            // means the declaration is malformed; let the type speak anyway.
+
             fn->setBase(std::move(type));
             type = std::move(fn);
             continue;
         }
         break;
     }
-    // 'int a[2][3]': the FIRST bracket is the outermost array.
+
     for (std::size_t i = arrays.size(); i > 0; --i) {
         arrays[i - 1]->setBase(std::move(type));
         type = std::move(arrays[i - 1]);
@@ -440,7 +418,7 @@ bool CParser::directDeclarator(CTypePtr base, std::string *name, CTypePtr *out,
 
 bool CParser::declarator(CTypePtr base, std::string *name, CTypePtr *out,
                          bool abstractAllowed) {
-    // Pointers wrap the base before the direct declarator sees it.
+
     while (at("*")) {
         advance();
         CTypePtr pointer(new CType(CType::Kind::Pointer));
@@ -492,7 +470,6 @@ std::unique_ptr<CDeclaration> CParser::declaration(
     decl->setOffset(current().offset);
     decl->setStorage(specifiers.storage);
 
-    // 'struct point { ... };' - a shape with nothing declared of it.
     if (at(";")) {
         advance();
         decl->setBareType(std::move(specifiers.type));
@@ -509,7 +486,6 @@ std::unique_ptr<CDeclaration> CParser::declaration(
         }
         declarator.type = std::move(type);
 
-        // A function definition: first declarator, function type, then '{'.
         if (first && wasFunctionDef != nullptr &&
             declarator.type->kind() == CType::Kind::Function && at("{")) {
             *wasFunctionDef = true;
@@ -543,8 +519,6 @@ std::unique_ptr<CDeclaration> CParser::declaration(
     if (!expect(";", "after the declaration")) return nullptr;
     return decl;
 }
-
-// -------------------------------------------------------------- statements
 
 CStmtPtr CParser::compound() {
     const std::size_t offset = current().offset;
@@ -648,8 +622,7 @@ CStmtPtr CParser::statement() {
         if (at(";")) {
             advance();
         } else if (atTypeStart()) {
-            // A declaration in a for header is C99; cc1 accepts it as an
-            // extension, so it is parsed here and the conversion pass rules.
+
             Specifiers specifiers;
             bool sawAny = false;
             if (!declarationSpecifiers(&specifiers, &sawAny)) return nullptr;
@@ -764,7 +737,6 @@ CStmtPtr CParser::statement() {
         return stmt;
     }
 
-    // 'name:' labels a statement; anything else is an expression statement.
     if (current().kind == CTokenKind::Identifier && peek(1).is(":")) {
         std::string name = current().text;
         advance();
@@ -783,8 +755,6 @@ CStmtPtr CParser::statement() {
     stmt->setOffset(offset);
     return stmt;
 }
-
-// ------------------------------------------------------------- expressions
 
 CExprPtr CParser::expression() {
     CExprPtr left = assignment();
@@ -808,7 +778,7 @@ CExprPtr CParser::assignment() {
         const std::string op = current().text;
         const std::size_t offset = current().offset;
         advance();
-        CExprPtr right = assignment();       // right-associative
+        CExprPtr right = assignment();
         if (right == nullptr) return nullptr;
         left.reset(new CAssign(op, std::move(left), std::move(right)));
         left->setOffset(offset);
@@ -846,7 +816,7 @@ CExprPtr CParser::binary(int minPrecedence) {
         const std::string op = current().text;
         const std::size_t offset = current().offset;
         advance();
-        CExprPtr right = binary(precedence + 1);   // all left-associative
+        CExprPtr right = binary(precedence + 1);
         if (right == nullptr) return nullptr;
         left.reset(new CBinary(op, std::move(left), std::move(right)));
         left->setOffset(offset);
@@ -855,9 +825,7 @@ CExprPtr CParser::binary(int minPrecedence) {
 }
 
 CExprPtr CParser::castExpression() {
-    // '(' type ')' cast-expression - told from a parenthesised expression by
-    // what follows the '(': a type can only start with a keyword or a
-    // typedef name.
+
     if (at("(")) {
         const CToken &next = peek(1);
         const bool looksLikeType =
@@ -1017,8 +985,7 @@ CExprPtr CParser::primary() {
             return expr;
         }
         case CTokenKind::StringLiteral: {
-            // Adjacent string literals concatenate, C90 5.1.1.2 phase 6. The
-            // spelling keeps each piece as written, joined with a space.
+
             std::string text = token.text;
             std::string spelling = token.spelling;
             advance();
@@ -1056,8 +1023,6 @@ CExprPtr CParser::primary() {
     return nullptr;
 }
 
-// ---------------------------------------------------------------- top level
-
 std::unique_ptr<CProgram> CParser::parse() {
     std::unique_ptr<CProgram> program(new CProgram());
 
@@ -1081,7 +1046,7 @@ std::unique_ptr<CProgram> CParser::parse() {
             declaration(std::move(specifiers), &wasFunctionDef, &fn);
 
         if (wasFunctionDef) {
-            if (fn == nullptr) break;    // the body failed to parse
+            if (fn == nullptr) break;
             program->add(std::move(fn));
             continue;
         }
@@ -1093,4 +1058,4 @@ std::unique_ptr<CProgram> CParser::parse() {
     return program;
 }
 
-}  // namespace c2s
+}

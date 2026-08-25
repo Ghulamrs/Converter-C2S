@@ -61,8 +61,6 @@ bool Parser::startsLine(size_t at) const {
 std::unique_ptr<Program> Parser::parse() {
     std::unique_ptr<Program> program(new Program());
 
-    // Only declarations and 'fun' definitions may appear at global scope; a
-    // statement there is an error naming itself.
     while (index_ < tokens_.size() && !failed_) {
         if (at(Tok::Fun)) {
             std::unique_ptr<Function> f = parseFunction();
@@ -83,25 +81,14 @@ std::unique_ptr<Program> Parser::parse() {
     return failed_ ? nullptr : std::move(program);
 }
 
-// fun <outputs> = name(inputs) { body }
-//
-// '=' does duty as the separator between the output list and the name, which
-// is the cause of the '>=' case below rather than a design. Because the lexer
-// matches the longest operator first, 'fun <>= main()' - the closing '>' of
-// the list written hard against the separator - arrives as one '>=' token.
-// That spelling parsed before '>=' was an operator at all, so it is read here
-// as the '>' plus the '=' rather than silently breaking programs over an
-// operator they do not use.
 std::unique_ptr<Function> Parser::parseFunction() {
     Prototype proto;
     proto.line = current().line;
-    advance();                                            // 'fun'
+    advance();
 
     if (!atOperator("<")) { failUnexpected(); return nullptr; }
     advance();
 
-    // The output list holds types. '<r>' named a variable in 2.x; it is a
-    // parse error now, because 'r' is not a type.
     while (!atOperator(">") && !atOperator(">=")) {
         const Type *type = scalarTypeHere();
         if (!type) { failUnexpected(); return nullptr; }
@@ -141,7 +128,7 @@ std::unique_ptr<Function> Parser::parseFunction() {
         const Type *type = scalar;
         for (int i = 0; i < rank; ++i) type = Type::arrayOf(type);
         parameter.type = type;
-        // An array is a reference always; '&' says so for a scalar.
+
         if (rank > 0) parameter.byReference = false;
         proto.inputs.push_back(parameter);
         if (!match(Tok::Comma)) break;
@@ -161,8 +148,6 @@ Block Parser::parseBlock() {
     if (!expect(Tok::BraceOpen, "Missing '{' to start block")) return body;
     ++blockDepth_;
 
-    // The loop detects end of input by the index rather than by a terminator
-    // token, because tokenize() emits none.
     while (index_ < tokens_.size() && !at(Tok::BraceClose)) {
         StmtPtr s = parseStatement();
         if (failed_) { --blockDepth_; return body; }
@@ -173,8 +158,6 @@ Block Parser::parseBlock() {
     return body;
 }
 
-// Every statement is stamped with the file it was read from as it leaves the
-// parser, so that nothing below has to be told twice.
 StmtPtr Parser::parseStatement() {
     StmtPtr made = parseStatementBody();
     if (made) made->setUnit(unit_);
@@ -208,16 +191,12 @@ StmtPtr Parser::parseStatementBody() {
         return StmtPtr(new Continue(line));
     }
 
-    // An identifier followed by one of the four assignment spellings can only
-    // begin a statement. That is the whole of how a statement boundary is
-    // found here: there is no terminator, and the parser decides by what it
-    // is looking at.
     if (at(Tok::Return)) return parseReturn();
     if (atOperator("<") && looksLikeMultiAssignHeader(index_)) return parseMultiAssign();
 
     if (at(Tok::Identifier)) {
         Tok next = peek(1).kind;
-        // An index chain may stand between the name and the assignment.
+
         if (next == Tok::BracketOpen) {
             size_t i = index_ + 1;
             int depth = 0;
@@ -245,7 +224,7 @@ StmtPtr Parser::parseStatementBody() {
             (next == Tok::Operator && peek(1).text == "=")) {
             return parseAssignment();
         }
-        // A call written where a statement belongs, its outputs discarded.
+
         if (next == Tok::ParensOpen) {
             const int line = current().line;
             ExprPtr call = parsePrimary();
@@ -257,8 +236,6 @@ StmtPtr Parser::parseStatementBody() {
     return nullptr;
 }
 
-// 'int' opens a term when it is 'int(x)' and does not when it is 'int k : 5'.
-// One token of lookahead separates them.
 bool Parser::atDeclaration() const {
     if (!at(Tok::Int) && !at(Tok::Real) && !at(Tok::Char)) return false;
     return peek(1).kind != Tok::ParensOpen;
@@ -297,14 +274,10 @@ StmtPtr Parser::parseDeclaration() {
     return StmtPtr(node.release());
 }
 
-// 'x : e', and the three spellings that mean the same thing. '=' is accepted
-// silently in this position; '+:' and '-:' are expanded here into 'x : x + e'
-// and 'x : x - e', so that nothing downstream has to know they existed.
 StmtPtr Parser::parseAssignment() {
     const int line = current().line;
     const std::string name = advance().text;
 
-    // The target may be an element: 'A[i][j] : v'.
     ExprPtr target(new Var(name));
     while (at(Tok::BracketOpen)) {
         advance();
@@ -325,18 +298,13 @@ StmtPtr Parser::parseAssignment() {
     return StmtPtr(new Assign(std::move(target), std::move(value), line));
 }
 
-// An initializer is an array literal or an ordinary expression.
 ExprPtr Parser::parseInitializer() {
     if (at(Tok::BraceOpen)) return parseArrayLiteral();
     return parseExpression();
 }
 
-// '{ Slot { "," Slot } }', where a slot may be empty. A trailing comma is a
-// slot too, not an error: that follows from counting slots by commas and
-// cannot be special-cased away without also breaking '{1.0,,}', which needs
-// its trailing gap to mean a third entry.
 ExprPtr Parser::parseArrayLiteral() {
-    advance();                                     // '{'
+    advance();
     std::unique_ptr<ArrayLit> node(new ArrayLit());
     if (match(Tok::BraceClose)) return ExprPtr(node.release());
 
@@ -355,9 +323,6 @@ ExprPtr Parser::parseArrayLiteral() {
     return ExprPtr(node.release());
 }
 
-// 'return', 'return e', or 'return (e, e, ...)' - the parentheses are
-// required for two or more, which is what tells the list from a single
-// parenthesised expression.
 StmtPtr Parser::parseReturn() {
     const int line = current().line;
     advance();
@@ -385,8 +350,6 @@ StmtPtr Parser::parseReturn() {
     return StmtPtr(node.release());
 }
 
-// Whether the parenthesised group starting here holds a comma at its top
-// level, which is what separates 'return (a, b)' from 'return (a + b)'.
 bool Parser::parenGroupHasTopLevelComma(size_t start) const {
     int depth = 0;
     for (size_t i = start; i < tokens_.size(); ++i) {
@@ -409,8 +372,6 @@ bool Parser::parenGroupHasTopLevelComma(size_t start) const {
     return false;
 }
 
-// '<a,b> : f(...)'. The '<' is overloaded three ways, so wherever one could
-// start a statement the parser peeks for the exact shape before committing.
 bool Parser::looksLikeMultiAssignHeader(size_t start) const {
     size_t i = start + 1;
     if (i >= tokens_.size() || tokens_[i].kind != Tok::Identifier) return false;
@@ -429,13 +390,13 @@ bool Parser::looksLikeMultiAssignHeader(size_t start) const {
 
 StmtPtr Parser::parseMultiAssign() {
     const int line = current().line;
-    advance();                                     // '<'
+    advance();
 
     std::unique_ptr<MultiAssign> node(new MultiAssign(line));
     node->addTarget(advance().text);
     while (match(Tok::Comma)) node->addTarget(advance().text);
-    advance();                                     // '>'
-    advance();                                     // ':'
+    advance();
+    advance();
 
     if (!at(Tok::Identifier) || peek(1).kind != Tok::ParensOpen) {
         failUnexpected();
@@ -486,16 +447,6 @@ StmtPtr Parser::parseWhile() {
     return StmtPtr(new While(std::move(condition), std::move(body), line));
 }
 
-// Two written forms:
-//
-//     for i : start to end [step s]     inclusive of end
-//     for i < n [step s]                0 to n - 1
-//
-// The second is sugar for the first and is expanded here, which is why 'step'
-// rides along unchanged and why nothing downstream knows the difference. The
-// '<' needs no lookahead to disambiguate: a '<' in that position was a parse
-// error in every earlier version of the language, so nothing legal changed
-// meaning when it was given one.
 StmtPtr Parser::parseFor() {
     const int line = current().line;
     advance();
@@ -535,9 +486,6 @@ StmtPtr Parser::parseFor() {
                            std::move(step), std::move(body), line));
 }
 
-// A print command must be the first token on its line. The rule's real
-// purpose is at most one print command per line, since a second one
-// necessarily has the first's items before it.
 StmtPtr Parser::parsePrint() {
     if (!startsLine(index_)) {
         fail(std::string(at(Tok::PrintLine) ? "'?'" : "'?\?'") + " must start its line");
@@ -551,8 +499,8 @@ StmtPtr Parser::parsePrint() {
     while (startsTerm() && !startsLine(index_) && !looksLikeNewStatement(index_)) {
         ExprPtr item;
         if (atPrecisionDirective()) {
-            advance();                             // 'prec'
-            advance();                             // '('
+            advance();
+            advance();
             ExprPtr places = parseExpression();
             if (failed_) return nullptr;
             if (!expect(Tok::ParensClose, unexpected())) return nullptr;
@@ -566,10 +514,6 @@ StmtPtr Parser::parsePrint() {
     return StmtPtr(node.release());
 }
 
-// Where a print item list stops. This is load-bearing rather than a
-// convenience: a token missing from it does not produce an error, it silently
-// ends the list. Anything added to the expression grammar as a prefix has to
-// be added here too.
 bool Parser::startsTerm() const {
     switch (current().kind) {
     case Tok::IntLiteral:
@@ -579,15 +523,12 @@ bool Parser::startsTerm() const {
     case Tok::ParensOpen:
         return true;
     case Tok::Operator:
-        // Unary minus, and nothing else in the operator class: a term cannot
-        // begin with '*'.
+
         return current().text == "-";
     case Tok::Int:
     case Tok::Real:
     case Tok::Char:
-        // 'int' opens a term when it is 'int(x)' and does not when it is
-        // 'int k : 5'. This is why the question takes a position rather than
-        // a token kind.
+
         return peek(1).kind == Tok::ParensOpen;
     default:
         return false;
@@ -640,8 +581,7 @@ ExprPtr Parser::parseComparison() {
     ExprPtr left = parseAdditive();
     while (!failed_) {
         Binary::Op op;
-        // A '<' that opens a multi-assign header is not a comparison, so it
-        // ends the expression rather than continuing it.
+
         if (atOperator("<") && looksLikeMultiAssignHeader(index_)) break;
         if      (atOperator("="))  op = Binary::Op::Equal;
         else if (atOperator("!=")) op = Binary::Op::NotEqual;
@@ -686,7 +626,6 @@ ExprPtr Parser::parseMultiplicative() {
     return left;
 }
 
-// '^' is right-associative: '2^3^2' is 2^(3^2), which is 512 and not 64.
 ExprPtr Parser::parsePower() {
     ExprPtr base = parsePrimary();
     if (failed_ || !atOperator("^")) return base;
@@ -697,18 +636,12 @@ ExprPtr Parser::parsePower() {
 }
 
 ExprPtr Parser::parsePrimary() {
-    // Unary minus folds the negation into its operand here and returns it as
-    // one finished term, before the caller can see a following '^'. That is
-    // why '-2^2' is '(-2)^2' and evaluates to 4, unlike ordinary maths
-    // notation. On the exponent side the recursion in parsePower() puts it
-    // back the usual way round, so '2^-2' is 2^(-2).
+
     if (atOperator("-")) {
         advance();
         ExprPtr operand = parsePrimary();
         if (failed_) return nullptr;
-        // A negated literal becomes the literal, so '-5' is one constant
-        // rather than a subtraction from zero. Anything else is the
-        // subtraction, which is all the language needs a unary minus to be.
+
         if (operand->isIntLiteral()) {
             const int32_t value = static_cast<const IntLit &>(*operand).value();
             return ExprPtr(new IntLit(-value));
@@ -732,13 +665,10 @@ ExprPtr Parser::parsePrimary() {
         const Token &t = advance();
         return parsePostfix(ExprPtr(new StrLit(t.text)));
     }
-    // int(x), real(x), char(x). These are keywords, so the parser has to read
-    // them here rather than leaving them to the identifier path - which is
-    // why they were implemented on both sides once and unreachable from
-    // either.
+
     if ((at(Tok::Int) || at(Tok::Real) || at(Tok::Char)) && peek(1).kind == Tok::ParensOpen) {
         const Type *target = scalarTypeHere();
-        advance();                                 // '('
+        advance();
         ExprPtr inner = parseExpression();
         if (failed_) return nullptr;
         if (!expect(Tok::ParensClose, unexpected())) return nullptr;
@@ -771,8 +701,6 @@ ExprPtr Parser::parsePrimary() {
     return nullptr;
 }
 
-// Indexing and the dimension attributes share one loop, so they chain in any
-// order: 'M[k].row', 'A.dim(i)'.
 ExprPtr Parser::parsePostfix(ExprPtr base) {
     while (!failed_) {
         if (at(Tok::BracketOpen)) {
@@ -805,8 +733,7 @@ ExprPtr Parser::parsePostfix(ExprPtr base) {
                 fail("No '." + what + "' - use .row, .col or .dim(n)");
                 return nullptr;
             }
-            // An attribute is read-only; a following assignment says the
-            // programmer thought otherwise.
+
             if (at(Tok::Assign) || at(Tok::PlusAssign) || at(Tok::MinusAssign)) {
                 fail("'." + what + "' is read-only");
                 return nullptr;
@@ -822,4 +749,4 @@ bool Parser::atPrecisionDirective() const {
     return at(Tok::Identifier) && current().text == "prec" && peek(1).kind == Tok::ParensOpen;
 }
 
-}  // namespace shalimar
+}

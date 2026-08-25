@@ -64,4 +64,4 @@ std::unique_ptr<shalimar::Program> SFrontEnd::parseAndCheck(const Source &source
     return program;
 }
 
-}  // namespace c2s
+}

@@ -11,7 +11,7 @@ bool endsWith(const std::string &text, const std::string &suffix) {
     return text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
-}  // namespace
+}
 
 const char *Options::usage() {
     return
@@ -128,4 +128,4 @@ Direction Options::resolvedDirection() const {
     return Direction::Infer;
 }
 
-}  // namespace c2s
+}

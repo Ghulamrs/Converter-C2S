@@ -7,15 +7,6 @@
 
 namespace c2s {
 
-// C89 text to tokens.
-//
-// The grammar is C90's, matching what Compiler-C reads, with the same two
-// deliberate refusals: no trigraphs and no wide literals reach the converter
-// meaningfully (a wide literal lexes, and the conversion pass refuses it with
-// a location rather than the lexer guessing). Comments of both styles are
-// eaten as whitespace. Every token keeps its original spelling, which is what
-// lets the C printer put back '0x1F' rather than '31' and lets a diagnostic
-// quote the file rather than a paraphrase.
 class CLexer {
 public:
     explicit CLexer(const std::string &text) : text_(text) {}
@@ -38,6 +29,6 @@ private:
     std::size_t tokenStart_ = 0;
 };
 
-}  // namespace c2s
+}
 
 #endif

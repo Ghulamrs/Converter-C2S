@@ -14,10 +14,6 @@ std::string Type::spelling() const {
     return "int";
 }
 
-// Interning. The three scalars are objects with static lifetime; an array type
-// is made once per element type and kept, so 'real[][]' asked for twice is one
-// pointer both times. The constructor is private and these four are the only
-// way in, which is what makes pointer identity mean type identity.
 const Type *Type::intType() {
     static const Type t(Kind::Int, nullptr);
     return &t;
@@ -42,4 +38,4 @@ const Type *Type::arrayOf(const Type *element) {
     return created;
 }
 
-}  // namespace shalimar
+}

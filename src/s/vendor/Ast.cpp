@@ -22,8 +22,6 @@ const char *Binary::spelling(Op op) {
     return "?";
 }
 
-// A comparison answers 1 or 0 whatever it compared, and so do the two
-// connectives. Everything else answers in the type of its operands.
 bool Binary::yieldsInt(Op op) {
     switch (op) {
     case Op::Equal:
@@ -75,4 +73,4 @@ const Function *Program::find(const std::string &name) const {
     return nullptr;
 }
 
-}  // namespace shalimar
+}

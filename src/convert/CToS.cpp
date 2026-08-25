@@ -12,8 +12,6 @@ namespace c2s {
 
 namespace {
 
-// A name Shalimar cannot take: its keywords (matched case-insensitively by
-// shc's lexer), the builtins, the two constants, and 'prec'.
 bool isShalimarReserved(const std::string &name) {
     static const char *const words[] = {
         "if", "elseif", "else", "while", "for", "to", "step", "fun", "return",
@@ -32,8 +30,6 @@ bool isShalimarReserved(const std::string &name) {
     return false;
 }
 
-// The C89 math functions Shalimar answers with a builtin of the same
-// meaning. 'fabs' changes its name; 'fmod' becomes the '%' operator.
 const char *builtinFor(const std::string &name) {
     static const char *const same[] = {
         "sqrt", "log", "exp", "sin", "cos", "tan", "asin", "acos", "atan",
@@ -50,10 +46,6 @@ shalimar::ExprPtr sInt(long long value) {
     return shalimar::ExprPtr(new shalimar::IntLit(static_cast<int32_t>(value)));
 }
 
-// Does a call hide anywhere in this expression? A call is the one thing that
-// makes evaluating an lvalue twice observable: '++' and assignment inside an
-// expression are already refused before this is asked, and a division that
-// faults, faults the same way on its first evaluation either way.
 bool containsCall(CExpr &node) {
     if (dynamic_cast<CCall *>(&node) != nullptr) return true;
     if (CUnary *unary = dynamic_cast<CUnary *>(&node)) {
@@ -88,11 +80,6 @@ bool containsCall(CExpr &node) {
     return false;
 }
 
-
-// A read-only walk over a C subtree, answering two questions at once: how
-// far into the source the subtree reaches, and every place a given name is
-// read. Both together decide whether a for loop's counter is still live
-// after the loop ends - see counterEscapes.
 class NameScan : public CVisitor {
 public:
     explicit NameScan(std::string name) : name_(std::move(name)) {}
@@ -205,15 +192,13 @@ private:
     std::vector<std::size_t> uses_;
 };
 
-}  // namespace
+}
 
 CToS::CToS(const Source &source, Diagnostics &diagnostics,
            const Permissions &permissions)
     : source_(source), permissions_(permissions) {
     (void)diagnostics;
 }
-
-// ------------------------------------------------------------------ helpers
 
 int CToS::lineOf(std::size_t offset) const {
     return source_.locate(offset).line();
@@ -233,10 +218,7 @@ void CToS::markBeyond(std::size_t offset, const std::string &reason) {
     ++beyondCount_;
     shalimar::StmtPtr marker(new SBeyondStmt(reason, sourceLinesAt(offset),
                                              lineOf(offset)));
-    // A refusal outside any function body - a struct, a file-scope
-    // declaration - has to appear too, or the count says six and a reader
-    // looking for six finds five. Program keeps its top-level order, so the
-    // marker lands there and prints where the construct stood.
+
     if (block_ != nullptr) {
         block_->push_back(std::move(marker));
     } else if (program_ != nullptr) {
@@ -245,19 +227,7 @@ void CToS::markBeyond(std::size_t offset, const std::string &reason) {
 }
 
 const shalimar::Type *CToS::scalarS(const CType &type, bool *lossy) const {
-    // Two different answers are wanted here, and the callers all spell the
-    // test 'scalar == nullptr || lossy'. A null return means Shalimar has no
-    // type of that shape at all - void, a struct, a pointer - and no
-    // permission moves it. 'lossy' means there is a type, and reaching it
-    // costs range or signedness: that is the one --allow-narrowing forgives.
-    //
-    // What forgiving it actually costs, said plainly because the flag's help
-    // line cannot: an 'unsigned' becomes an 'int', so a value above INT_MAX
-    // and C's defined wraparound both stop being representable - and
-    // Shalimar makes passing the int limit a runtime error rather than a
-    // wrapped value, so the program stops instead of quietly disagreeing.
-    // A 'long' the same, one word narrower. That is a real change of
-    // meaning, and it is why this is off unless asked for by name.
+
     const bool forgive = permissions_.narrowing();
     *lossy = false;
     switch (type.kind()) {
@@ -267,10 +237,10 @@ const shalimar::Type *CToS::scalarS(const CType &type, bool *lossy) const {
             }
             return shalimar::Type::intType();
         case CType::Kind::Double:
-            if (!forgive && type.isLong()) *lossy = true;      // long double
+            if (!forgive && type.isLong()) *lossy = true;
             return shalimar::Type::realType();
         case CType::Kind::Float:
-            return shalimar::Type::realType();     // widened, harmlessly
+            return shalimar::Type::realType();
         case CType::Kind::Char:
             if (!forgive && (type.isUnsigned() || type.isSignedExplicit())) {
                 *lossy = true;
@@ -299,9 +269,7 @@ const CToS::Info *CToS::lookup(const std::string &name) const {
 }
 
 bool CToS::isPure(CExpr &node) const {
-    // Pure enough to evaluate unconditionally: no calls, no indexing, no
-    // division, no assignment, no increment. What remains cannot fault and
-    // cannot be observed happening.
+
     if (dynamic_cast<CIntLit *>(&node) != nullptr) return true;
     if (dynamic_cast<CFloatLit *>(&node) != nullptr) return true;
     if (dynamic_cast<CCharLit *>(&node) != nullptr) return true;
@@ -336,13 +304,6 @@ bool CToS::isCharContext(CExpr &other) const {
     return false;
 }
 
-// Is this C expression already char-valued on the Shalimar side? A char
-// variable or an element of a char array converts to a char, and a written
-// (char) cast becomes char(). Everything else - a literal, arithmetic, a
-// call - arrives as an int, and needs char() written around it before shc
-// will let it land where a char is required. The literal cases were handled
-// first and the rest were not, which is how 'c = ch + 1' converted with exit
-// 0 into a file shc refused.
 bool CToS::isCharValued(CExpr &node) const {
     if (isCharContext(node)) return true;
     if (CCast *cast = dynamic_cast<CCast *>(&node)) {
@@ -358,8 +319,7 @@ bool CToS::isArrayValued(CExpr &node) const {
         return info != nullptr && info->rank > 0;
     }
     if (CIndex *index = dynamic_cast<CIndex *>(&node)) {
-        // A partial index is still an array: 'grid[1]' of an int[2][3] is a
-        // row. Count the subscripts written and compare with the rank.
+
         int given = 1;
         CExpr *walk = &index->base();
         while (CIndex *deeper = dynamic_cast<CIndex *>(walk)) {
@@ -384,22 +344,16 @@ shalimar::ExprPtr CToS::intWrap(shalimar::ExprPtr value) {
         new shalimar::Convert(std::move(value), shalimar::Type::intType()));
 }
 
-// -------------------------------------------------------------- expressions
-
 shalimar::ExprPtr CToS::expression(CExpr &node) {
     shalimar::ExprPtr saved = std::move(expr_);
     expr_.reset();
-    // Latch whether this position can take statements, and deny it to
-    // everything nested inside: a caller sets canLift_ for the expression it
-    // is about to convert, not for that expression's operands. A visitor
-    // that cares reads liftable_ on its first line, before any nested
-    // expression() call moves it on.
+
     liftable_ = canLift_;
     canLift_ = false;
     node.accept(*this);
     shalimar::ExprPtr result = std::move(expr_);
     expr_ = std::move(saved);
-    if (result == nullptr) result = sInt(0);   // after a marker; keeps the tree whole
+    if (result == nullptr) result = sInt(0);
     return result;
 }
 
@@ -410,8 +364,7 @@ void CToS::visit(CIntLit &node) {
         expr_.reset();
         return;
     }
-    // A hex or octal spelling becomes its value in decimal - Shalimar has
-    // only decimal - and a fitting U suffix simply drops.
+
     expr_ = sInt(node.value());
 }
 
@@ -420,8 +373,7 @@ void CToS::visit(CFloatLit &node) {
 }
 
 void CToS::visit(CCharLit &node) {
-    // Its code point; the assignment and comparison paths wrap it in
-    // char() when the other side is a char.
+
     expr_ = sInt(node.value());
 }
 
@@ -449,8 +401,7 @@ void CToS::visit(CUnary &node) {
     const std::string &op = node.op();
 
     if (op == "-" && node.prefix()) {
-        // Fold into the literal the way shc's parser does; anything else is
-        // a subtraction from zero, which prints as '0 - x'.
+
         if (CIntLit *lit = dynamic_cast<CIntLit *>(&node.operand())) {
             expr_ = sInt(-lit->value());
             return;
@@ -468,9 +419,7 @@ void CToS::visit(CUnary &node) {
         return;
     }
     if (op == "!" && node.prefix()) {
-        // Shalimar has no '!'; 'x = 0' answers the same 1 or 0. A char has
-        // to be asked for its code first - shc will not compare a char with
-        // the int 0 - which is the same promotion C performs silently.
+
         shalimar::ExprPtr operand = expression(node.operand());
         if (isCharContext(node.operand())) operand = intWrap(std::move(operand));
         expr_.reset(new shalimar::Binary(shalimar::Binary::Op::Equal,
@@ -499,9 +448,6 @@ void CToS::visit(CUnary &node) {
     expr_.reset();
 }
 
-// Move whatever the last expression lifted into the block the statement is
-// being built in. Called before the statement itself is pushed, so the
-// rewrite's ifs stand ahead of the thing that reads their temporary.
 void CToS::flushLifted() {
     for (std::size_t i = 0; i < lifted_.size(); ++i) {
         block_->push_back(std::move(lifted_[i]));
@@ -517,39 +463,9 @@ std::string CToS::mintLiftTemp(const shalimar::Type *type) {
     return name;
 }
 
-// '&&' or '||' with an impure right side, rewritten as statements.
-//
-// Shalimar's '&' and '|' evaluate both sides before either is asked, so
-// 'i < n & a[i] = 0' indexes a[n] on the last turn - which is the whole
-// reason C's short circuit exists. The faithful form is a nest of ifs
-// writing a temporary, and ifs are statements:
-//
-//     a && b            sc_1 : 0
-//                       if <a> {
-//                         <whatever b needed>
-//                         if <b> { sc_1 : 1 }
-//                       }
-//
-//     a || b            sc_1 : 0
-//                       if <a> { sc_1 : 1 }
-//                       if sc_1 = 0 {
-//                         <whatever b needed>
-//                         if <b> { sc_1 : 1 }
-//                       }
-//
-// and the expression itself becomes 'sc_1'. Both shapes ask <a> exactly
-// once and <b> only on the turn C would have asked it.
-//
-// Returns false when there is nowhere to put those statements, leaving the
-// caller to refuse. That boundary is the ternary's, for the same reason and
-// deliberately: a rewrite that needs a statement works where a statement can
-// be expanded around it, and nowhere else.
 bool CToS::lowerShortCircuit(CBinary &node) {
     const bool isAnd = node.op() == "&&";
 
-    // The left side is in a liftable position too, so 'a && b && c' - which
-    // parses as '(a && b) && c' - rewrites all the way down rather than
-    // refusing at the second one.
     std::vector<shalimar::StmtPtr> outer;
     outer.swap(lifted_);
     canLift_ = true;
@@ -567,8 +483,6 @@ bool CToS::lowerShortCircuit(CBinary &node) {
     lifted_.push_back(shalimar::StmtPtr(new shalimar::Assign(
         shalimar::ExprPtr(new shalimar::Var(temp)), sInt(0), line)));
 
-    // The right side is converted into its own block, so that anything it
-    // lifts in turn is guarded by the same condition it is.
     std::vector<shalimar::StmtPtr> around;
     around.swap(lifted_);
     canLift_ = true;
@@ -615,8 +529,7 @@ void CToS::visit(CBinary &node) {
     const bool liftable = liftable_;
 
     if (op == "&&" || op == "||") {
-        // Shalimar's '&' and '|' evaluate both sides. Safe only when the
-        // right side cannot fault and does nothing observable.
+
         if (!isPure(node.rhs())) {
             if (permissions_.shortCircuit() && liftable) {
                 lowerShortCircuit(node);
@@ -645,12 +558,6 @@ void CToS::visit(CBinary &node) {
         return;
     }
 
-    // Comparing whole arrays. In C89 's == "abc"' compares two addresses and
-    // is false for two distinct objects; in Shalimar char[] is text and '='
-    // compares what it says. Both compile, and they answer differently -
-    // 'diff' against 'same' - which is the one outcome this converter is
-    // built to refuse. There is no faithful form to fall back on either:
-    // Shalimar has no addresses to compare.
     if ((op == "==" || op == "!=") &&
         (isArrayValued(node.lhs()) || isArrayValued(node.rhs()))) {
         markBeyond(node.offset(),
@@ -682,40 +589,24 @@ void CToS::visit(CBinary &node) {
     shalimar::ExprPtr lhs = expression(node.lhs());
     shalimar::ExprPtr rhs = expression(node.rhs());
 
-    // C's integer promotion, written out. The moment a char is used
-    // arithmetically C makes it an int and says nothing; Shalimar has no
-    // such rule and refuses '+' on a char outright, so the promotion has to
-    // appear in the output as int(). Getting this wrong is not only a
-    // compile error: '%d' of an unpromoted char is accepted by shc and
-    // prints the character where C printed its code.
-    //
-    // A char array is left alone - rank is why isCharContext says no to one
-    // - because '+' on those is Shalimar's string concatenation, which is
-    // a different operator wearing the same spelling.
     const bool comparison = mapped == Op::Equal || mapped == Op::NotEqual ||
                             mapped == Op::Less || mapped == Op::Greater ||
                             mapped == Op::LessEqual || mapped == Op::GreaterEqual;
     const bool lhsChar = isCharContext(node.lhs());
     const bool rhsChar = isCharContext(node.rhs());
     if (comparison) {
-        // A char literal against a char stays a char comparison - that is
-        // char against char, which Shalimar does allow, and it reads better
-        // than two codes.
+
         if (dynamic_cast<CCharLit *>(&node.rhs()) != nullptr && lhsChar) {
             rhs = charWrap(std::move(rhs));
         } else if (dynamic_cast<CCharLit *>(&node.lhs()) != nullptr && rhsChar) {
             lhs = charWrap(std::move(lhs));
         } else if (lhsChar != rhsChar) {
-            // A char against a plain number: C compares the codes.
+
             if (lhsChar) lhs = intWrap(std::move(lhs));
             else rhs = intWrap(std::move(rhs));
         }
     } else {
-        // Arithmetic on a char is where C's silent promotion changes what a
-        // program means, so writing it out as int() is a permission, not a
-        // default. Comparisons stay above: Shalimar compares chars itself,
-        // and a char against a number is a promotion C and Shalimar agree
-        // must happen for the comparison to exist at all.
+
         if ((lhsChar || rhsChar) && !permissions_.charArithmetic()) {
             markBeyond(node.offset(),
                        "'" + op + "' on a char - C promotes the char to its "
@@ -732,9 +623,7 @@ void CToS::visit(CBinary &node) {
 }
 
 void CToS::visit(CAssign &node) {
-    // Assignment as a value - 'a = b = c', 'while ((x = f()))' - has no
-    // Shalimar expression; the statement path unchains the simple case
-    // before coming here.
+
     markBeyond(node.offset(), "assignment used as a value");
     expr_.reset();
 }
@@ -823,9 +712,7 @@ void CToS::visit(CComma &node) {
     expr_.reset();
 }
 
-void CToS::visit(CBeyond &) {}    // never appears in a parsed C tree
-
-// --------------------------------------------------------------- statements
+void CToS::visit(CBeyond &) {}
 
 void CToS::statement(CStmt &node) {
     node.accept(*this);
@@ -850,8 +737,6 @@ void CToS::visit(CEmpty &) {}
 void CToS::visit(CExprStmt &node) {
     CExpr &e = node.expr();
 
-    // The statement-only rewrites, tried in order of specificity.
-
     if (CUnary *unary = dynamic_cast<CUnary *>(&e)) {
         if (unary->op() == "++" || unary->op() == "--") {
             shalimar::ExprPtr target = expression(unary->operand());
@@ -865,7 +750,6 @@ void CToS::visit(CExprStmt &node) {
     if (CAssign *assign = dynamic_cast<CAssign *>(&e)) {
         const std::string &op = assign->op();
 
-        // 'x = c ? a : b' becomes if / else writing x twice.
         if (op == "=") {
             if (CTernary *ternary = dynamic_cast<CTernary *>(&assign->value())) {
                 const bool charTarget = isCharContext(assign->target());
@@ -893,13 +777,9 @@ void CToS::visit(CExprStmt &node) {
                 return;
             }
 
-            // 'a = b = c' unchains right to left.
             if (CAssign *inner = dynamic_cast<CAssign *>(&assign->value())) {
                 if (inner->op() == "=") {
-                    // The unchaining reads the inner target back, so the
-                    // output evaluates it twice where C evaluated it once.
-                    // Only a call in it can make that observable, and one
-                    // did: 'a = b[f()] = 5' ran f twice.
+
                     if (containsCall(inner->target())) {
                         markBeyond(node.offset(),
                                    "a chained assignment whose inner target "
@@ -909,8 +789,7 @@ void CToS::visit(CExprStmt &node) {
                                    "variable");
                         return;
                     }
-                    // Convert the inner assignment first, then assign its
-                    // target to the outer target.
+
                     shalimar::ExprPtr innerTarget = expression(inner->target());
                     shalimar::ExprPtr innerValue = expression(inner->value());
                     block_->push_back(shalimar::StmtPtr(new shalimar::Assign(
@@ -924,23 +803,15 @@ void CToS::visit(CExprStmt &node) {
             }
 
             const int before = beyondCount_;
-            // The whole right side of a plain assignment is a place a
-            // rewrite can expand into: its statements go ahead of the
-            // assignment they compute a value for.
+
             canLift_ = true;
             shalimar::ExprPtr value = expression(assign->value());
-            // A value stored into a char lands as char(n). This began as the
-            // two literal spellings of one - C writes the NUL that ends a
-            // string as 0 rather than as '\0' - and turned out to be every
-            // int-valued expression: shc refuses an unwrapped int wherever a
-            // char is required, so 'c = ch + 1' was a file the converter
-            // reported converting and shc would not compile.
+
             if (isCharContext(assign->target()) && !isCharValued(assign->value())) {
                 value = charWrap(std::move(value));
             }
             shalimar::ExprPtr target = expression(assign->target());
-            // A marker spoke for part of this statement; the placeholder
-            // that kept the walk alive must not become a wrong assignment.
+
             if (beyondCount_ != before) { lifted_.clear(); return; }
             flushLifted();
             block_->push_back(shalimar::StmtPtr(new shalimar::Assign(
@@ -959,10 +830,7 @@ void CToS::visit(CExprStmt &node) {
             return;
         }
         if (op == "*=" || op == "/=" || op == "%=") {
-            // The spelled-out 'x : x * e' evaluates x twice where C's 'x *= e'
-            // evaluates it once. Harmless until a call hides in the target -
-            // 'b[f()] *= 3' ran f twice - so that shape is refused rather
-            // than quietly doubled.
+
             if (containsCall(assign->target())) {
                 markBeyond(node.offset(),
                            "'" + op + "' on a target that calls a function - "
@@ -1006,37 +874,27 @@ void CToS::visit(CExprStmt &node) {
         return;
     }
 
-    // Any other expression statement computes and discards; without side
-    // effects it means nothing, and Shalimar cannot say it.
     markBeyond(node.offset(), "an expression statement with no effect Shalimar "
                               "can express");
 }
 
 void CToS::visit(CDeclStmt &node) {
-    // The Declare itself was emitted by the hoist, at the top of the
-    // function. Two things are left to do here, and both belong at the point
-    // in the block where the declaration actually stood: bind the name, and
-    // run any initialiser.
+
     CDeclaration &decl = node.decl();
     std::vector<CDeclaration::Declarator> &declarators = decl.declarators();
     for (std::size_t i = 0; i < declarators.size(); ++i) {
         CDeclaration::Declarator &declarator = declarators[i];
 
-        // Binding here is what makes a shadow a shadow: the name enters the
-        // innermost scope at the point C says it becomes visible, and goes
-        // again when block() pops that scope. A declarator the hoist could
-        // not type has no entry, and was marked beyond there.
         std::map<std::size_t, Info>::const_iterator found =
             hoisted_.find(declarator.offset);
         if (found == hoisted_.end()) continue;
-        // Bound one at a time, in order, so 'int a = 1, b = a;' sees the 'a'
-        // it just declared rather than an outer one.
+
         scopes_.back()[declarator.name] = found->second;
         const Info &info = found->second;
 
         if (declarator.init == nullptr) continue;
-        if (declarator.init->isList()) continue;   // carried by the hoisted Declare
-        if (info.rank != 0) continue;              // arrays init at the top
+        if (declarator.init->isList()) continue;
+        if (info.rank != 0) continue;
 
         shalimar::ExprPtr value = expression(*declarator.init->expr());
         if (info.isChar && !isCharValued(*declarator.init->expr())) {
@@ -1049,18 +907,13 @@ void CToS::visit(CDeclStmt &node) {
 }
 
 void CToS::visit(CIf &node) {
-    // 'else if' chains flatten into elseif branches - Shalimar's 'elseif'
-    // is one keyword and a nested if inside else is not grammatical.
+
     std::unique_ptr<shalimar::If> branch(new shalimar::If(lineOf(node.offset())));
 
     CIf *walk = &node;
     bool firstCondition = true;
     for (;;) {
-        // Only the first condition can take lifted statements. A chained
-        // 'else if' must not be evaluated until the ones above it have
-        // failed, and statements hoisted ahead of the whole If would run
-        // unconditionally - so those conditions are converted with no
-        // permission to lift, and refuse instead.
+
         canLift_ = firstCondition;
         shalimar::ExprPtr cond = expression(walk->cond());
         if (firstCondition) flushLifted();
@@ -1097,20 +950,6 @@ void CToS::visit(CWhile &node) {
         return;
     }
 
-    // The condition needed statements to compute, and a while asks its
-    // condition again on every turn - so the statements have to be inside
-    // the loop, which means the loop cannot be the one doing the testing:
-    //
-    //     while 1 {
-    //       <the rewrite's ifs>
-    //       if <cond> = 0 { break }
-    //       <body>
-    //     }
-    //
-    // 'continue' still does the right thing here, which is why this shape
-    // was chosen over hoisting the computation and repeating it at the end
-    // of the body: a continue jumps to the top, where the condition is
-    // recomputed and retested, exactly as C's while does.
     const int line = lineOf(node.offset());
     shalimar::Block body;
     for (std::size_t i = 0; i < lifted_.size(); ++i) {
@@ -1135,8 +974,6 @@ void CToS::visit(CWhile &node) {
 
 namespace {
 
-// Does this statement subtree contain a break or continue that would bind
-// to the ENCLOSING loop - i.e. not shielded by a nested loop or switch?
 class FindsLoopJump : public CVisitor {
 public:
     bool found = false;
@@ -1145,11 +982,11 @@ public:
 
     void visit(CBreak &) override { if (!findContinueOnly) found = true; }
     void visit(CContinue &) override { if (!findBreakOnly) found = true; }
-    void visit(CWhile &) override {}       // a nested loop shields its jumps
+    void visit(CWhile &) override {}
     void visit(CDoWhile &) override {}
     void visit(CFor &) override {}
     void visit(CSwitch &node) override {
-        // A switch shields break but not continue.
+
         if (findContinueOnly) {
             node.body().accept(*this);
             return;
@@ -1199,11 +1036,6 @@ bool containsLoopJump(CStmt &node, bool continueOnly) {
     return finder.found;
 }
 
-// A 'break' inside this statement that C would bind to the switch the
-// statement belongs to: one not shielded by a loop or a further switch of
-// its own. The trailing break of a case has already been taken off the
-// body by the time this is asked, so what it finds is a break that leaves
-// from somewhere other than the end.
 bool containsSwitchBreak(CStmt &node) {
     FindsLoopJump finder;
     finder.findBreakOnly = true;
@@ -1211,12 +1043,10 @@ bool containsSwitchBreak(CStmt &node) {
     return finder.found;
 }
 
-}  // namespace
+}
 
 void CToS::visit(CDoWhile &node) {
-    // Peeled: the body once, then the while. A break or continue in the
-    // peeled copy would sit outside any loop - a Shalimar parse error - so
-    // that shape is a marker instead.
+
     if (containsLoopJump(node.body(), false)) {
         markBeyond(node.offset(),
                    "a do-while whose body breaks or continues - the peeled "
@@ -1234,26 +1064,9 @@ void CToS::visit(CDoWhile &node) {
 }
 
 bool CToS::counterEscapes(CFor &node, const std::string &name) const {
-    // Shalimar's 'for i : a to b' binds its own counter for the duration of
-    // the loop. C's does not: after a C for, the variable still holds
-    // whatever ended the loop - the limit it failed, or the value it broke
-    // at - and reading it there is how you find an index.
-    //
-    // So the counting form is only faithful when nothing reads the counter
-    // after the loop. 'After' is decided on source position: anything
-    // reaching past the last offset inside the loop is later than it. A read
-    // before the loop cannot see the stale value and does not count, which
-    // matters - two 'for' loops over the same 'i' are ordinary, and treating
-    // the second's init as an escape would cost the first its counting form
-    // for nothing.
-    if (currentFn_ == nullptr) return true;   // nothing to look at; be safe
 
-    // A counter that is not this function's own is out of this walk's
-    // reach. This scan reads one function body; a global can be read by any
-    // other function in the file, and there is no seeing them from here. So
-    // it is treated as read, which costs the counting form and keeps the
-    // answer right - a global counter left holding 0 where C left it 3 is a
-    // program that runs and disagrees.
+    if (currentFn_ == nullptr) return true;
+
     if (isFileScope(name)) return true;
 
     NameScan loop(name);
@@ -1264,19 +1077,13 @@ bool CToS::counterEscapes(CFor &node, const std::string &name) const {
     for (std::size_t i = 0; i < uses.size(); ++i) {
         if (uses[i] > loop.reach()) return true;
 
-        // 'Before' is a statement about the source, not about the run. Where
-        // this for is itself inside a loop, everything before it comes round
-        // again after it - so on the second turn a read above the for is
-        // reading what the for left, which is the very thing the counting
-        // form does not leave. Source order alone said that was safe.
         if (loopDepth_ > 0 && uses[i] < node.offset()) return true;
     }
     return false;
 }
 
 bool CToS::isFileScope(const std::string &name) const {
-    // Innermost outwards, stopping before the file's own scope: a nearer
-    // binding means the name is not the global one.
+
     for (std::size_t i = scopes_.size(); i > 1; --i) {
         if (scopes_[i - 1].count(name) != 0) return false;
     }
@@ -1284,10 +1091,7 @@ bool CToS::isFileScope(const std::string &name) const {
 }
 
 bool CToS::lowerCountingFor(CFor &node, std::string *escapedCounter) {
-    // The counting shape: 'for (i = A; i <= B; i += K)' and its variants,
-    // where i is a plain int name. Becomes 'for i : A to B [step K]'.
-    // '<' tightens the bound by one; a negative K arrives via 'i -= K' or
-    // 'i--'. Anything else returns false and the general lowering runs.
+
     CExprStmt *initStmt = dynamic_cast<CExprStmt *>(node.init());
     if (initStmt == nullptr || node.cond() == nullptr || node.step() == nullptr) {
         return false;
@@ -1307,7 +1111,6 @@ bool CToS::lowerCountingFor(CFor &node, std::string *escapedCounter) {
         return false;
     }
 
-    // The step: i++, ++i, i--, --i, i += K, i -= K.
     long long sign = 0;
     CExpr *stepAmount = nullptr;
     if (CUnary *bump = dynamic_cast<CUnary *>(node.step())) {
@@ -1327,13 +1130,11 @@ bool CToS::lowerCountingFor(CFor &node, std::string *escapedCounter) {
         return false;
     }
 
-    // The direction and the relation must agree.
     if ((sign > 0 && (relation == ">" || relation == ">=")) ||
         (sign < 0 && (relation == "<" || relation == "<="))) {
         return false;
     }
 
-    // The shape fits. Whether the form does is a separate question.
     if (counterEscapes(node, name)) {
         if (escapedCounter != nullptr) *escapedCounter = name;
         return false;
@@ -1362,7 +1163,6 @@ bool CToS::lowerCountingFor(CFor &node, std::string *escapedCounter) {
     } else if (sign < 0) {
         step = sInt(-1);
     }
-    // sign > 0 with no amount: step 1, Shalimar's default; leave it null.
 
     shalimar::Block body;
     ++loopDepth_;
@@ -1379,9 +1179,6 @@ void CToS::visit(CFor &node) {
     std::string escaped;
     if (lowerCountingFor(node, &escaped)) return;
 
-    // The general lowering: init; while (cond) { body; step }. A continue
-    // in the body would skip the step - the shape C defines around - so
-    // that combination is a marker.
     if (containsLoopJump(node.body(), true)) {
         markBeyond(node.offset(),
                    escaped.empty()
@@ -1443,36 +1240,6 @@ void CToS::visit(CFor &node) {
         std::move(cond), std::move(body), lineOf(node.offset()))));
 }
 
-// The --allow-fall-through lowering.
-//
-// The if/elseif chain the ordinary lowering builds cannot say "and then the
-// next one too": every branch of a Shalimar 'if' is exclusive, which is
-// exactly right for a switch whose cases all break and exactly wrong for one
-// whose cases do not. So this drops the chain for the shape C actually has -
-// pick an arm to enter, then run arms from there until one ends.
-//
-// Two integers carry that. 'entry' is the index of the arm control enters at,
-// initialised past the last arm so that a selector matching nothing runs no
-// body. 'done' turns on when an arm that ended with 'break' or 'return' has
-// run, and stops the ones after it.
-//
-//     sw_1       : <selector>
-//     sw_1_entry : <arm count>
-//     if sw_1_entry = <count> & (sw_1 = 1 | sw_1 = 2) { sw_1_entry : 0 }
-//     if sw_1_entry = <count> & sw_1 = 3              { sw_1_entry : 1 }
-//     if sw_1_entry = <count> { sw_1_entry : <default index> }
-//     sw_1_done : 0
-//     if sw_1_entry <= 0 & sw_1_done = 0 { <arm 0> sw_1_done : 1 }
-//     if sw_1_entry <= 1 & sw_1_done = 0 { <arm 1> }
-//
-// The matching runs to completion before any body does, which is what makes
-// a 'default' sitting in the middle of the list behave: it is chosen only
-// when no case label matched, yet an arm above it can still fall into it,
-// because falling in is a question about 'entry <= i' and not about matching.
-//
-// Every test here is a comparison of integers, so Shalimar evaluating both
-// sides of '&' and '|' costs nothing - there is no call, no index and no
-// division anywhere in a condition this builds.
 void CToS::lowerFallingSwitchArms(CSwitch &node, const SwitchTemps &names,
                                   std::vector<SwitchArm> &arms,
                                   const std::vector<bool> &terminates,
@@ -1481,13 +1248,9 @@ void CToS::lowerFallingSwitchArms(CSwitch &node, const SwitchTemps &names,
 
     const int count = static_cast<int>(arms.size());
 
-    // 'no arm' is one past the last, so that the guard below is a single
-    // comparison rather than a range test.
     block_->push_back(shalimar::StmtPtr(new shalimar::Assign(
         shalimar::ExprPtr(new shalimar::Var(names.entry)), sInt(count), line)));
 
-    // The unmatched test, rebuilt for each arm - an expression tree is owned
-    // once and these cannot share one.
     struct Unmatched {
         const std::string &entry;
         int count;
@@ -1506,7 +1269,6 @@ void CToS::lowerFallingSwitchArms(CSwitch &node, const SwitchTemps &names,
             continue;
         }
 
-        // selector = v1 | selector = v2 | ...
         shalimar::ExprPtr match;
         for (std::size_t v = 0; v < arm.values.size(); ++v) {
             shalimar::ExprPtr test(new shalimar::Binary(
@@ -1518,9 +1280,7 @@ void CToS::lowerFallingSwitchArms(CSwitch &node, const SwitchTemps &names,
                                                   std::move(match),
                                                   std::move(test)));
         }
-        // A 'default' grouped with case labels - 'case 1: default:' - is
-        // both: it matches its values, and it is where an unmatched
-        // selector goes.
+
         if (arm.isDefault) defaultIndex = i;
         if (match == nullptr) continue;
 
@@ -1556,14 +1316,7 @@ void CToS::lowerFallingSwitchArms(CSwitch &node, const SwitchTemps &names,
         shalimar::Block *saved = block_;
         block_ = &armBody;
         for (std::size_t k = 0; k < arm.body.size(); ++k) {
-            // A 'break' anywhere but the tail was already dropped by the
-            // caller; one that is still here is inside an if, and it means
-            // "leave the switch from here" - which is a jump out of the
-            // middle of this arm's body, and there is nothing to jump to.
-            // A break still here after the tail one was dropped leaves the
-            // switch from the middle. With a wrapper around this switch
-            // there is somewhere for it to go and statement() emits it;
-            // without one there is not.
+
             if (!wrapped && dynamic_cast<CBreak *>(arm.body[k]) != nullptr) {
                 markBeyond(arm.body[k]->offset(),
                            "a break inside the case but not at its end");
@@ -1571,8 +1324,7 @@ void CToS::lowerFallingSwitchArms(CSwitch &node, const SwitchTemps &names,
             }
             statement(*arm.body[k]);
         }
-        // Only an arm that ends itself needs to say so, and only while
-        // there is a later arm that would otherwise run.
+
         if (terminates[i] && i + 1 < arms.size()) {
             armBody.push_back(shalimar::StmtPtr(new shalimar::Assign(
                 shalimar::ExprPtr(new shalimar::Var(names.done)), sInt(1),
@@ -1600,19 +1352,13 @@ void CToS::lowerFallingSwitchArms(CSwitch &node, const SwitchTemps &names,
 }
 
 void CToS::lowerSwitch(CSwitch &node) {
-    // The selector is saved once - C evaluates it once - into a temporary
-    // the hoist walk declared at the top of the function, then the cases
-    // become an if / elseif / else chain testing it. Grouped empty cases join with '|'; each case's trailing break
-    // drops; genuine fall-through, or a break bound to the switch from
-    // inside an if, is a marker.
+
     CCompound *body = dynamic_cast<CCompound *>(&node.body());
     if (body == nullptr) {
         markBeyond(node.offset(), "a switch whose body is not a block");
         return;
     }
 
-    // The selector's name and its Declare came from the hoist walk; only
-    // the assignment belongs here, where the switch stands.
     std::map<std::size_t, SwitchTemps>::const_iterator minted =
         switchTemps_.find(node.offset());
     if (minted == switchTemps_.end()) {
@@ -1622,18 +1368,10 @@ void CToS::lowerSwitch(CSwitch &node) {
     const SwitchTemps names = minted->second;
     const std::string selector = names.selector;
 
-    // C promotes the selector to int whatever it arrived as, and int()
-    // writes that promotion down: it is the identity on an int, and on a
-    // char it is the code the case values compare against. Without it a
-    // char selector reached the int temporary as a char, and shc refused a
-    // file this converter had reported converting.
     block_->push_back(shalimar::StmtPtr(new shalimar::Assign(
         shalimar::ExprPtr(new shalimar::Var(selector)),
         intWrap(expression(node.cond())), lineOf(node.offset()))));
 
-    // Walk the case list. Each entry in the C tree is a CCase owning its
-    // labelled statement; the rest of a case's body is the following
-    // statements up to the next CCase.
     std::vector<SwitchArm> arms;
 
     std::vector<CStmtPtr> &items = body->body();
@@ -1647,7 +1385,7 @@ void CToS::lowerSwitch(CSwitch &node) {
             } else {
                 arm.values.push_back(expression(*label->value()));
             }
-            // Grouped labels: the owned statement is itself a case.
+
             CStmt *inner = &label->body();
             while (CCase *grouped = dynamic_cast<CCase *>(inner)) {
                 if (grouped->isDefault()) arm.isDefault = true;
@@ -1669,10 +1407,6 @@ void CToS::lowerSwitch(CSwitch &node) {
         arms.back().body.push_back(item);
     }
 
-    // Which arms end themselves, and therefore whether any of them runs on
-    // into the next. Both answers are wanted before a single body is
-    // converted, because between them they choose which of two whole
-    // lowerings this switch gets - and the bodies can only be walked once.
     std::vector<bool> terminates(arms.size(), false);
     bool anyFallsThrough = false;
     for (std::size_t i = 0; i < arms.size(); ++i) {
@@ -1685,39 +1419,12 @@ void CToS::lowerSwitch(CSwitch &node) {
         if (!arm.body.empty() &&
             (dynamic_cast<CReturn *>(arm.body.back()) != nullptr ||
              dynamic_cast<CContinue *>(arm.body.back()) != nullptr)) {
-            // A return ends the case as surely as a break does, and so
-            // does a continue - it leaves the switch and the enclosing
-            // turn together, so nothing below it in the switch runs and
-            // it is not fall-through.
+
             terminates[i] = true;
         }
         if (!terminates[i] && i + 1 < arms.size()) anyFallsThrough = true;
     }
 
-    // Does any arm leave the switch from somewhere other than its end? The
-    // trailing break of each case has already been taken off above, so what
-    // this finds is a break inside an if, or one followed by more
-    // statements - the shape C spells 'stop here' and Shalimar has no
-    // statement for.
-    //
-    // It has no statement for it, but it has a shape. A switch is a block
-    // entered once and left at a point of its choosing, and so is a loop
-    // that always ends its first turn:
-    //
-    //     while 1 {
-    //       <the arms>
-    //       break
-    //     }
-    //
-    // Every break in a case then binds to that wrapper, which contains
-    // exactly this switch and nothing else - so leaving the wrapper and
-    // leaving the switch are the same jump, and an enclosing loop never
-    // sees it. A loop written inside an arm still shields its own breaks,
-    // being nearer.
-    //
-    // The wrapper is only built where it is needed, because it costs a
-    // level of indentation and an unconditional loop in the output, and
-    // most switches do not need it.
     bool needsWrapper = false;
     for (std::size_t i = 0; i < arms.size() && !needsWrapper; ++i) {
         for (std::size_t k = 0; k < arms[i].body.size(); ++k) {
@@ -1725,12 +1432,6 @@ void CToS::lowerSwitch(CSwitch &node) {
         }
     }
 
-    // The wrapper's one cost, and it is the mirror of the fault that made
-    // it necessary. A 'continue' written in a case belongs to a loop
-    // OUTSIDE the switch, and Shalimar would bind it to the wrapper -
-    // which would run the switch again instead of ending the outer turn.
-    // A continue inside a loop written within an arm is that loop's and is
-    // not affected.
     if (needsWrapper) {
         for (std::size_t i = 0; i < arms.size(); ++i) {
             for (std::size_t k = 0; k < arms[i].body.size(); ++k) {
@@ -1744,11 +1445,6 @@ void CToS::lowerSwitch(CSwitch &node) {
         }
     }
 
-    // For the length of the arm bodies, any loop outside this switch is out
-    // of reach: C binds a break to the nearest enclosing switch OR loop,
-    // and inside a case that is the switch. Where a wrapper was built the
-    // depth is 1, because the wrapper is a real Shalimar loop and a break
-    // belongs to it; where none was, it is 0 and a break is refused.
     const int outerLoopDepth = loopDepth_;
     loopDepth_ = needsWrapper ? 1 : 0;
 
@@ -1763,15 +1459,10 @@ void CToS::lowerSwitch(CSwitch &node) {
         return;
     }
 
-    // Convert each arm; the trailing break has already been dropped, an
-    // absent one that is not the last arm is fall-through, and a break
-    // elsewhere is C's escape from the switch, which the chain has no need
-    // of - but only when it is the tail. Deeper breaks are markers.
     std::unique_ptr<shalimar::If> chain(new shalimar::If(lineOf(node.offset())));
     shalimar::Block defaultBody;
     bool haveDefault = false;
     bool haveBranch = false;
-
 
     for (std::size_t i = 0; i < arms.size(); ++i) {
         SwitchArm &arm = arms[i];
@@ -1787,10 +1478,7 @@ void CToS::lowerSwitch(CSwitch &node) {
         shalimar::Block *saved = block_;
         block_ = &armBody;
         for (std::size_t k = 0; k < arm.body.size(); ++k) {
-            // A break still here after the tail one was dropped leaves the
-            // switch from the middle. With a wrapper around this switch
-            // there is somewhere for it to go and statement() emits it;
-            // without one there is not.
+
             if (!needsWrapper && dynamic_cast<CBreak *>(arm.body[k]) != nullptr) {
                 markBeyond(arm.body[k]->offset(),
                            "a break inside the case but not at its end");
@@ -1806,7 +1494,6 @@ void CToS::lowerSwitch(CSwitch &node) {
             continue;
         }
 
-        // The condition: selector = v1 | selector = v2 | ...
         shalimar::ExprPtr cond;
         for (std::size_t v = 0; v < arm.values.size(); ++v) {
             shalimar::ExprPtr test(new shalimar::Binary(
@@ -1821,7 +1508,6 @@ void CToS::lowerSwitch(CSwitch &node) {
         haveBranch = true;
     }
 
-
     loopDepth_ = outerLoopDepth;
 
     if (haveDefault) chain->setElse(std::move(defaultBody));
@@ -1831,8 +1517,6 @@ void CToS::lowerSwitch(CSwitch &node) {
     closeSwitchWrapper(node, needsWrapper, outerBlock, wrapped);
 }
 
-// Put the arms inside 'while 1 { ... break }' and that in the block the
-// switch stands in. The trailing break is what makes it one turn.
 void CToS::closeSwitchWrapper(CSwitch &node, bool needsWrapper,
                               shalimar::Block *outerBlock,
                               shalimar::Block &wrapped) {
@@ -1849,7 +1533,7 @@ void CToS::visit(CSwitch &node) {
 }
 
 void CToS::visit(CCase &node) {
-    // Reached only outside a switch body walk, which lowerSwitch prevents.
+
     markBeyond(node.offset(), "a case label outside a switch this converter read");
 }
 
@@ -1869,9 +1553,7 @@ void CToS::visit(CContinue &node) {
 
 bool CToS::lowerTernaryReturn(CTernary &top, std::size_t offset,
                              shalimar::Block *into) {
-    // 'return c ? a : b' as an if / else with a return in each arm. An
-    // assignment's version of this writes the target twice; there is no
-    // target here, but two returns say the same thing.
+
     const int before = beyondCount_;
     std::unique_ptr<shalimar::If> branch(new shalimar::If(lineOf(offset)));
 
@@ -1882,10 +1564,6 @@ bool CToS::lowerTernaryReturn(CTernary &top, std::size_t offset,
         if (!returnArm(walk->thenArm(), offset, &thenBody)) return false;
         branch->addBranch(std::move(cond), std::move(thenBody));
 
-        // A conditional in the else position flattens into 'elseif' rather
-        // than nesting: 'elseif' is one keyword in Shalimar and an 'if'
-        // inside an 'else' is not grammatical. visit(CIf) walks its chain
-        // for the same reason.
         if (CTernary *chained = dynamic_cast<CTernary *>(&walk->elseArm())) {
             walk = chained;
             continue;
@@ -1896,17 +1574,13 @@ bool CToS::lowerTernaryReturn(CTernary &top, std::size_t offset,
         break;
     }
 
-    // Something in an arm was refused. The marker is already in the block
-    // where the return stood; adding a branch that returns a placeholder
-    // beside it would be a function quietly answering the wrong number.
     if (beyondCount_ != before) return false;
     into->push_back(shalimar::StmtPtr(branch.release()));
     return true;
 }
 
 bool CToS::returnArm(CExpr &value, std::size_t offset, shalimar::Block *into) {
-    // A conditional in the 'then' position nests instead, which is
-    // grammatical - it is only 'else' that cannot take an 'if'.
+
     if (CTernary *nested = dynamic_cast<CTernary *>(&value)) {
         return lowerTernaryReturn(*nested, offset, into);
     }
@@ -1917,9 +1591,7 @@ bool CToS::returnArm(CExpr &value, std::size_t offset, shalimar::Block *into) {
 }
 
 void CToS::visit(CReturn &node) {
-    // 'return c ? a : b' expands into statements, so it is taken before the
-    // value is treated as an expression. Not in main, where a returned
-    // value is an exit status and has no Shalimar meaning either way.
+
     if (node.value() != nullptr && !currentIsMain_) {
         if (CTernary *ternary = dynamic_cast<CTernary *>(node.value())) {
             lowerTernaryReturn(*ternary, node.offset(), block_);
@@ -1931,8 +1603,7 @@ void CToS::visit(CReturn &node) {
     std::unique_ptr<shalimar::Return> ret(
         new shalimar::Return(lineOf(node.offset())));
     if (node.value() != nullptr) {
-        // main's exit status has no Shalimar meaning; 'return 0' drops its
-        // value, anything else is worth a marker.
+
         if (currentIsMain_) {
             CIntLit *lit = dynamic_cast<CIntLit *>(node.value());
             if (lit == nullptr || lit->value() != 0) {
@@ -1943,13 +1614,7 @@ void CToS::visit(CReturn &node) {
             canLift_ = true;
             shalimar::ExprPtr value = expression(*node.value());
             flushLifted();
-            // The last of the char crossings. A function declared to answer
-            // with a char, handed an int - 'return 66', or 'return 'A''
-            // which is its code point by the time it gets here - emitted the
-            // bare number into a 'fun <char>', and shc refused the output
-            // while c2s had already exited 0. Every other store into a char
-            // wraps; this one had nothing to ask, because the C tree carries
-            // no types and a return cannot see its own function's.
+
             if (currentReturnsChar_ && !isCharValued(*node.value())) {
                 value = charWrap(std::move(value));
             }
@@ -1957,8 +1622,7 @@ void CToS::visit(CReturn &node) {
         }
     }
     if (beyondCount_ != before) {
-        // The value could not be carried; a bare return here would silently
-        // change what the function answers, so the marker stands alone.
+
         return;
     }
     block_->push_back(shalimar::StmtPtr(ret.release()));
@@ -1974,12 +1638,9 @@ void CToS::visit(CLabel &node) {
 }
 
 void CToS::visit(CCompound &node) {
-    // A bare block is not a construct in Shalimar; its statements flatten
-    // into the enclosing body, with their own name scope.
+
     block(node, block_);
 }
-
-// ------------------------------------------------------------------- print
 
 void CToS::lowerPrintf(CCall &call) {
     CIdent *callee = static_cast<CIdent *>(&call.callee());
@@ -2013,9 +1674,6 @@ void CToS::lowerPrintf(CCall &call) {
         return;
     }
 
-    // printf. The format must be a literal; each %-hole consumes one
-    // argument; embedded newlines split into one print per line. Width,
-    // precision and the length modifiers are beyond this lowering.
     std::vector<CExprPtr> &args = call.args();
     if (args.empty()) {
         markBeyond(call.offset(), "printf with no format");
@@ -2030,28 +1688,6 @@ void CToS::lowerPrintf(CCall &call) {
     const std::string &text = format->text();
     std::size_t nextArg = 1;
 
-    // A printf with arguments becomes a Shalimar function that prints, and
-    // a call to it.
-    //
-    // The reason is C's evaluation order. C works out every argument of a
-    // printf before it writes any of them; Shalimar's '?' evaluates and
-    // writes one item at a time, so an argument that itself printed came
-    // out interleaved with the line it was an argument to - 'high 3 reach
-    // 3' rather than 'reach 3' and then 'high 3 1'. Same values, different
-    // output, nothing to say it happened.
-    //
-    // A call fixes that by construction rather than by patching it up:
-    // Shalimar evaluates a call's arguments before entering the function,
-    // which is exactly what C does at a printf. So the format's holes
-    // become the function's parameters, the '?' statements move inside it,
-    // and the call site carries the argument expressions.
-    //
-    // It reads better too. The format is written once, however many times
-    // that call sits in a loop, and the call site says what it is passing
-    // rather than spelling a print out again.
-    //
-    // A format with no holes needs none of this - there is nothing to
-    // evaluate and nothing to pass - so it stays an inline '?'.
     shalimar::Block prints;
     std::vector<shalimar::Param> params;
     std::vector<shalimar::ExprPtr> callArgs;
@@ -2061,10 +1697,6 @@ void CToS::lowerPrintf(CCall &call) {
     bool printHasItems = false;
     std::string pending;
 
-    // Note what the item spacing does: Shalimar writes one space after
-    // every item, so the converted program's output matches printf's up to
-    // whitespace, not byte for byte. That is the cost of '?', and the
-    // honest place to say so is here.
     struct Flush {
         void operator()(std::unique_ptr<shalimar::Print> &print,
                         std::string &pending, bool &printHasItems) const {
@@ -2079,7 +1711,7 @@ void CToS::lowerPrintf(CCall &call) {
         const char c = text[i];
         if (c == '\n') {
             flush(print, pending, printHasItems);
-            // This print ends its line.
+
             std::unique_ptr<shalimar::Print> done(new shalimar::Print(true, line));
             std::vector<shalimar::ExprPtr> &items = print->items();
             for (std::size_t k = 0; k < items.size(); ++k) {
@@ -2092,34 +1724,25 @@ void CToS::lowerPrintf(CCall &call) {
         }
         if (c != '%') {
             if (static_cast<unsigned char>(c) < 32 || c == '"') {
-                // block_ goes back first: while it points at the holding
-                // block the marker would land there and be discarded with
-                // it - a refusal counted but never shown, the exact fault
-                // the suite's marker count exists to catch.
+
                 block_ = outerBlock;
                 markBeyond(call.offset(),
                            "a format character Shalimar cannot spell");
                 return;
             }
-            // The mirror of the strip before a hole: a space directly after
-            // one is the '?' item space already written.
+
             if (c == ' ' && pending.empty() && printHasItems) continue;
             pending += c;
             continue;
         }
-        // A specifier.
+
         ++i;
         if (i >= text.size()) {
             block_ = outerBlock;
             markBeyond(call.offset(), "a format ending in '%'");
             return;
         }
-        // A length modifier names a width Shalimar has not got. Under
-        // --allow-narrowing the argument it describes has already become a
-        // plain int or real, so the modifier now describes a type that is
-        // not there and dropping it is what keeps the hole and the argument
-        // agreeing. Without the permission this never runs: the declaration
-        // that made the value 'long' was refused well before the printf.
+
         while (permissions_.narrowing() && i < text.size() &&
                (text[i] == 'l' || text[i] == 'h' || text[i] == 'L')) {
             ++i;
@@ -2139,9 +1762,7 @@ void CToS::lowerPrintf(CCall &call) {
             markBeyond(call.offset(), "more format holes than arguments");
             return;
         }
-        // '?' writes a space after every item, so the single space printf
-        // formats usually put around a hole is already provided; dropping
-        // it here brings the outputs to within a trailing space of equal.
+
         if (!pending.empty() && pending[pending.size() - 1] == ' ') {
             pending.erase(pending.size() - 1);
         }
@@ -2149,20 +1770,12 @@ void CToS::lowerPrintf(CCall &call) {
         shalimar::ExprPtr item = expression(*args[nextArg]);
 
         if (spec == 'f') {
-            // printf's %f writes six decimals; Shalimar's default is seven.
-            // prec(6) closes the gap, and stays set - every later real in a
-            // program lowered here comes from the same %f convention.
+
             print->add(shalimar::ExprPtr(new shalimar::Precision(sInt(6))));
             print->add(std::move(item));
         } else if (spec == 'd' || spec == 'i' || spec == 's' ||
                    (spec == 'u' && permissions_.narrowing())) {
-            // '%u' only under the permission, and for the same reason as the
-            // modifiers above: once unsigned has been narrowed to int there
-            // is nothing unsigned left to print. '%x' and '%o' stay refused
-            // either way - those are a radix, not a width, and '?' writes
-            // decimal.
-            // '%d' of a char prints its code in C, and '?' of a char prints
-            // the character. Same promotion as the arithmetic one above.
+
             if ((spec == 'd' || spec == 'i') && isCharContext(*args[nextArg])) {
                 item = intWrap(std::move(item));
             }
@@ -2171,23 +1784,14 @@ void CToS::lowerPrintf(CCall &call) {
             print->add(charWrap(std::move(item)));
         } else {
             block_ = outerBlock;
-            // '%g' and '%e' were carried here until they were run: both
-            // came out as '?' writes a real, so C's '0.5' and
-            // '5.000000e-01' both printed '0.5000000'. '%f' works because
-            // prec(6) matches its six places; the other two are a choice of
-            // notation and of significant digits, and Shalimar's prec is
-            // neither. Refused rather than printed differently.
+
             markBeyond(call.offset(),
                        std::string("the '%") + spec + "' format - only plain "
                        "%d %i %f %s %c carry, and '?' writes a real in fixed "
                        "notation");
             return;
         }
-        // The item the wraps above settled on is what the function will be
-        // handed: take it back out of the print, make it this call's next
-        // argument, and give the print a parameter to write instead. The
-        // parameter's type is the type of the value as written, which is
-        // what the format said.
+
         {
             std::vector<shalimar::ExprPtr> &written = print->items();
             shalimar::ExprPtr value = std::move(written.back());
@@ -2203,7 +1807,7 @@ void CToS::lowerPrintf(CCall &call) {
             } else if (spec == 'c') {
                 param.type = shalimar::Type::charType();
             } else if (spec == 's') {
-                // Text, which in Shalimar is a char array and travels as one.
+
                 param.type = shalimar::Type::arrayOf(shalimar::Type::charType());
             } else {
                 param.type = shalimar::Type::intType();
@@ -2218,12 +1822,6 @@ void CToS::lowerPrintf(CCall &call) {
         printHasItems = true;
     }
 
-    // C evaluates every argument of a printf, holes or no holes, and the
-    // ones beyond the format still run their side effects before anything
-    // prints. Dropping them here silently changed what the program did -
-    // the one thing this converter must never do - and Shalimar has no
-    // statement that evaluates a value only to discard it, so the mismatch
-    // goes back to the author instead.
     if (nextArg < args.size()) {
         block_ = outerBlock;
         markBeyond(call.offset(),
@@ -2234,15 +1832,14 @@ void CToS::lowerPrintf(CCall &call) {
 
     flush(print, pending, printHasItems);
     if (printHasItems) {
-        // No trailing newline: '??'.
+
         block_->push_back(shalimar::StmtPtr(print.release()));
     }
 
     block_ = outerBlock;
 
     if (params.empty()) {
-        // Nothing to pass, so nothing to order: the prints go where the
-        // printf stood.
+
         for (std::size_t i = 0; i < prints.size(); ++i) {
             block_->push_back(std::move(prints[i]));
         }
@@ -2259,15 +1856,6 @@ void CToS::lowerPrintf(CCall &call) {
         new shalimar::CallStmt(shalimar::ExprPtr(made.release()), line)));
 }
 
-// The printing function for one format, made once and shared by every call
-// that needs the same one.
-//
-// Two printfs share a function when the format text and the parameter types
-// both match - the body is a function of exactly those two things, so when
-// they agree the bodies would be identical. That is what keeps a printf in
-// a loop from emitting a fresh function per call site, and it is why the
-// types are part of the key: the same format with a char argument and with
-// an int argument writes different things.
 std::string CToS::printFunction(const std::string &format,
                                 const std::vector<shalimar::Param> &params,
                                 shalimar::Block body, int line) {
@@ -2295,24 +1883,13 @@ std::string CToS::printFunction(const std::string &format,
     return name;
 }
 
-// ------------------------------------------------------------ declarations
-
 void CToS::declareLocal(CDeclaration &decl, bool atTop) {
-    // Emits the Shalimar Declare - always at the top of whatever block_ is,
-    // which for the hoist walk is the top of the function - and renames the
-    // C name where it collides with one already handed out.
-    //
-    // Where the Info is then registered is what 'atTop' decides. The hoist
-    // (atTop) parks it in hoisted_ for the statement walk to bind in the
-    // right scope; a global (not atTop) goes straight into the outermost
-    // scope, which is the only one it could be in.
 
     std::vector<CDeclaration::Declarator> &declarators = decl.declarators();
     for (std::size_t i = 0; i < declarators.size(); ++i) {
         CDeclaration::Declarator &declarator = declarators[i];
         CType *type = declarator.type.get();
 
-        // Count array layers down to the scalar.
         int rank = 0;
         CType *walk = type;
         std::vector<CNode *> extents;
@@ -2352,8 +1929,7 @@ void CToS::declareLocal(CDeclaration &decl, bool atTop) {
         info.isChar = scalar->kind() == shalimar::Type::Kind::Char;
         info.type = scalar;
         if (atTop) {
-            // The hoist has no scope stack to register into; it parks the
-            // Info and the CDeclStmt visit binds it in the right scope.
+
             hoisted_[declarator.offset] = info;
         } else {
             scopes_.back()[declarator.name] = info;
@@ -2373,9 +1949,6 @@ void CToS::declareLocal(CDeclaration &decl, bool atTop) {
         }
         if (!extentsOk) continue;
 
-        // A constant initialiser rides the hoisted Declare; a scalar's
-        // runtime initialiser runs where the declaration stood (the
-        // CDeclStmt visit emits it).
         if (declarator.init != nullptr) {
             if (declarator.init->isList()) {
                 std::unique_ptr<shalimar::ArrayLit> literal(new shalimar::ArrayLit());
@@ -2400,7 +1973,7 @@ void CToS::declareLocal(CDeclaration &decl, bool atTop) {
                 }
                 made->initial() = shalimar::ExprPtr(literal.release());
             } else if (rank > 0) {
-                // 'char s[32] = "hello"' - the string rides the Declare.
+
                 if (CStringLit *stringInit =
                         dynamic_cast<CStringLit *>(declarator.init->expr())) {
                     made->initial() =
@@ -2411,21 +1984,14 @@ void CToS::declareLocal(CDeclaration &decl, bool atTop) {
                                "': an array initialised from an expression");
                 }
             } else if (!atTop) {
-                // A global scalar. It has no CDeclStmt site to run an
-                // initialiser at - convertTopDeclaration never visits one -
-                // so the value has to ride the Declare or be lost, which is
-                // what used to happen: 'double scale = 1.5;' became a plain
-                // 'real scale' and every use of it read zero. C89 requires a
-                // file-scope initialiser to be a constant expression, so
-                // there is nothing here that needed a statement anyway.
+
                 shalimar::ExprPtr value = expression(*declarator.init->expr());
                 if (info.isChar && !isCharValued(*declarator.init->expr())) {
                     value = charWrap(std::move(value));
                 }
                 made->initial() = std::move(value);
             }
-            // A local scalar's initialiser runs at its CDeclStmt site, in
-            // the block where it stood.
+
         }
 
         block_->push_back(shalimar::StmtPtr(made.release()));
@@ -2433,26 +1999,11 @@ void CToS::declareLocal(CDeclaration &decl, bool atTop) {
 }
 
 void CToS::hoistDeclarations(CStmt &node, shalimar::Block *top) {
-    // Every declaration in the function, at any depth, becomes a top-level
-    // Declare - Shalimar refuses one anywhere else. A genuine C shadow at an
-    // inner scope arrives here as a second declaration of the same name and
-    // gets a fresh name from rename()'s collision rule; which of the two any
-    // given reference means is settled later, by the statement walk, since
-    // this walk has no scope stack to say.
+
     if (CDeclStmt *decl = dynamic_cast<CDeclStmt *>(&node)) {
         shalimar::Block *saved = block_;
         block_ = top;
-        // A local 'static' outlives the call and is initialised once.
-        // Hoisted like any other local it becomes a plain variable that is
-        // initialised again on every call - which compiles, runs, and
-        // quietly means something else. Shalimar has no per-function
-        // persistence to put it in, so it is refused here, where a
-        // declaration is a local by construction.
-        //
-        // 'register' and 'auto' pass through: in C89 they are hints with no
-        // effect on meaning. A file-scope 'static' passes through too, in
-        // convertTopDeclaration - it says 'not visible to other translation
-        // units', and a Shalimar program is whole, so there are none.
+
         if (decl->decl().storage() == CDeclaration::Storage::Static) {
             std::vector<CDeclaration::Declarator> &statics =
                 decl->decl().declarators();
@@ -2494,12 +2045,7 @@ void CToS::hoistDeclarations(CStmt &node, shalimar::Block *top) {
         return;
     }
     if (CSwitch *sw = dynamic_cast<CSwitch *>(&node)) {
-        // The selector temporary is a declaration like any other, and
-        // Shalimar wants it at the top of the function - so it is minted
-        // here, where 'the top' is still reachable, rather than in
-        // lowerSwitch, which runs during the statement walk and could only
-        // put it wherever the switch happened to be. A switch inside a loop
-        // declared it inside the loop, and shc refused the file.
+
         char temp[24];
         std::snprintf(temp, sizeof temp, "sw_%d", ++tempCount_);
         SwitchTemps names;
@@ -2533,8 +2079,6 @@ void CToS::hoistDeclarations(CStmt &node, shalimar::Block *top) {
     }
 }
 
-// ----------------------------------------------------------------- program
-
 void CToS::convertFunction(CFunctionDef &fn) {
     const CType &type = fn.type();
     currentIsMain_ = fn.name() == "main";
@@ -2547,8 +2091,6 @@ void CToS::convertFunction(CFunctionDef &fn) {
                                                 : rename(fn.name())),
         lineOf(fn.offset()));
 
-    // Outputs: void is none; int, double, float, char are one; main's int
-    // becomes none - its status has no Shalimar meaning.
     const CType *returns = type.base();
     if (returns != nullptr && returns->kind() != CType::Kind::Void &&
         !currentIsMain_) {
@@ -2558,8 +2100,7 @@ void CToS::convertFunction(CFunctionDef &fn) {
             markBeyond(fn.offset(),
                        "the whole function '" + fn.name() + "' - it returns " +
                        returns->describe());
-            // Emit the marker at global level by holding it in a block that
-            // convert() routes; simplest is a function-shaped marker:
+
             return;
         }
         proto.outputs.push_back(scalar);
@@ -2569,9 +2110,6 @@ void CToS::convertFunction(CFunctionDef &fn) {
     scopes_.push_back(std::map<std::string, Info>());
     currentFn_ = &fn;
 
-    // Parameters: scalars by value, arrays as themselves, pointers to
-    // scalars as '&name' references when every use in the body is '*name' -
-    // this milestone takes the simpler road and marks pointer parameters.
     bool signatureOk = true;
     const std::vector<CType::Param> &params = type.params();
     for (std::size_t i = 0; i < params.size(); ++i) {
@@ -2581,8 +2119,7 @@ void CToS::convertFunction(CFunctionDef &fn) {
         int rank = 0;
         const CType *walk = ptype;
         while (walk != nullptr && walk->kind() == CType::Kind::Array) {
-            // The source-faithful tree keeps 'T a[]' as an Array; only a
-            // written '*' is a Pointer.
+
             ++rank;
             walk = walk->base();
         }
@@ -2630,11 +2167,6 @@ void CToS::convertFunction(CFunctionDef &fn) {
         block_ = saved;
         block(fn.body(), &body);
 
-        // The short-circuit temporaries, unlike every other local, are only
-        // discovered by walking expressions - so they cannot be minted by
-        // the hoist walk that runs before it. They are collected during the
-        // walk instead and declared here, at the top, which is where
-        // Shalimar wants every Declare and where the hoist put the rest.
         for (std::size_t i = liftTemps_.size(); i > 0; --i) {
             body.insert(body.begin(),
                         shalimar::StmtPtr(new shalimar::Declare(
@@ -2642,7 +2174,7 @@ void CToS::convertFunction(CFunctionDef &fn) {
                             nullptr, lineOf(fn.offset()))));
         }
     } else {
-        // The signature already spoke; the body would only cascade.
+
     }
 
     scopes_.pop_back();
@@ -2660,8 +2192,6 @@ std::unique_ptr<shalimar::Program> CToS::convert(CProgram &program) {
     scopes_.clear();
     scopes_.push_back(std::map<std::string, Info>());
 
-    // Pass one: learn every function defined here, so calls resolve, and
-    // give each its Shalimar name.
     std::vector<std::unique_ptr<CFunctionDef>> &functions = program.functions();
     for (std::size_t i = 0; i < functions.size(); ++i) {
         knownFunctions_.insert(functions[i]->name());
@@ -2687,8 +2217,7 @@ std::unique_ptr<shalimar::Program> CToS::convert(CProgram &program) {
 }
 
 void CToS::convertTopDeclaration(CDeclaration &decl) {
-    // Prototypes drop silently - Shalimar needs none. Typedefs, structs,
-    // enums and externs are markers; scalar and array globals carry.
+
     if (decl.storage() == CDeclaration::Storage::Typedef) {
         markBeyond(declOffset(decl), "a typedef - Shalimar has no named types");
         return;
@@ -2712,20 +2241,15 @@ void CToS::convertTopDeclaration(CDeclaration &decl) {
             anyPrototypes = true;
         }
     }
-    if (anyPrototypes) return;      // dropped: functions are collected whole
+    if (anyPrototypes) return;
 
-    // A global marker has no block to land in; globals go through a
-    // holding block, then into the program.
     shalimar::Block holder;
     shalimar::Block *saved = block_;
     block_ = &holder;
     declareLocal(decl, false);
     block_ = saved;
     for (std::size_t i = 0; i < holder.size(); ++i) {
-        // Declares and markers both, in the order they were made. A marker
-        // dropped here was the third way a refusal could vanish: the count
-        // still rose, so the run reported a construct it had nowhere shown,
-        // and the output was a smaller program that compiled.
+
         program_->addGlobal(std::move(holder[i]));
     }
 }
@@ -2735,4 +2259,4 @@ std::size_t CToS::declOffset(CDeclaration &decl) const {
     return decl.offset();
 }
 
-}  // namespace c2s
+}

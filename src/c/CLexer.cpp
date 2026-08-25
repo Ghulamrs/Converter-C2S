@@ -15,7 +15,6 @@ bool isIdentBody(char c) {
     return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_';
 }
 
-// The thirty-two keywords of C89.
 const char *const kKeywords[] = {
     "auto", "break", "case", "char", "const", "continue", "default", "do",
     "double", "else", "enum", "extern", "float", "for", "goto", "if",
@@ -31,8 +30,6 @@ bool isKeyword(const std::string &word) {
     return false;
 }
 
-// Three-character punctuators first, then two, then one - longest match, the
-// same discipline every C lexer keeps so '>>=' is not '>>' '='.
 const char *const kPuncts3[] = {"<<=", ">>=", "..."};
 const char *const kPuncts2[] = {
     "->", "++", "--", "<<", ">>", "<=", ">=", "==", "!=", "&&", "||",
@@ -40,7 +37,7 @@ const char *const kPuncts2[] = {
 };
 const char kPuncts1[] = "[](){}.&*+-~!/%<>^|?:;=,";
 
-}  // namespace
+}
 
 CLexResult CLexer::tokenize() {
     CLexResult result;
@@ -67,8 +64,6 @@ bool CLexer::step(CLexResult &result) {
         return true;
     }
 
-    // Both comment styles are whitespace. C89 has only /* */; // is accepted
-    // because cc1 accepts it, and both compilers in this workspace use it.
     if (c == '/' && at(i_ + 1) == '*') {
         i_ += 2;
         while (i_ < text_.size() && !(at(i_) == '*' && at(i_ + 1) == '/')) ++i_;
@@ -101,8 +96,7 @@ bool CLexer::step(CLexResult &result) {
     if (c == '\'') return charLiteral(result);
     if (c == '"') return stringLiteral(result);
     if (c == 'L' && (at(i_ + 1) == '\'' || at(i_ + 1) == '"')) {
-        // A wide literal lexes as its narrow self so the conversion pass can
-        // refuse it with a proper location; the 'L' is kept in the spelling.
+
         return fail(result, "wide literals are not accepted");
     }
 
@@ -112,9 +106,6 @@ bool CLexer::step(CLexResult &result) {
 bool CLexer::number(CLexResult &result) {
     const std::size_t begin = i_;
 
-    // Walk the widest shape first: digits, dot, exponent, suffixes. Whether
-    // it is integer or floating is decided by what was seen, exactly as
-    // C90 6.1.3 divides them.
     bool isFloat = false;
     bool hex = false;
 
@@ -143,8 +134,6 @@ bool CLexer::number(CLexResult &result) {
     CToken token;
     token.offset = begin;
 
-    // Suffixes: U and L for integers, F and L for floats, in any order and
-    // either case for the integer pair.
     if (isFloat) {
         if (at(i_) == 'f' || at(i_) == 'F') { token.isFloatSuffix = true; ++i_; }
         else if (at(i_) == 'l' || at(i_) == 'L') { token.isLong = true; ++i_; }
@@ -170,8 +159,7 @@ bool CLexer::number(CLexResult &result) {
         token.floatValue = std::strtod(digits.c_str(), nullptr);
     } else {
         token.kind = CTokenKind::IntLiteral;
-        // Base 0 reads 0x and leading-0 octal the way C does; a plain
-        // decimal is read as itself.
+
         token.intValue = std::strtoll(digits.c_str(), nullptr, 0);
         token.isHexOrOctal =
             hex || (digits.size() > 1 && digits[0] == '0' &&
@@ -184,7 +172,7 @@ bool CLexer::number(CLexResult &result) {
 }
 
 bool CLexer::escape(long long *value, std::string *spelling, CLexResult &result) {
-    // At the backslash. C89 escapes: the named ones, octal, and hex.
+
     *spelling += '\\';
     ++i_;
     const char c = at(i_);
@@ -339,4 +327,4 @@ bool CLexer::punct(CLexResult &result) {
     return fail(result, std::string("stray '") + c + "' in program");
 }
 
-}  // namespace c2s
+}

@@ -9,8 +9,6 @@ namespace c2s {
 
 namespace {
 
-// C's keywords, so a Shalimar name that collides is renamed rather than
-// emitted into a program that will not parse.
 bool isCKeyword(const std::string &word) {
     static const char *const keywords[] = {
         "auto", "break", "case", "char", "const", "continue", "default", "do",
@@ -45,8 +43,6 @@ CTypePtr pointerTo(CTypePtr base) {
     return type;
 }
 
-// The shape an array literal carries: rows, and columns when the rows are
-// themselves literals. The checker has already refused ragged shapes.
 void shapeOfLiteral(shalimar::ArrayLit &lit, std::vector<long long> *dims) {
     dims->push_back(static_cast<long long>(lit.elements().size()));
     if (!lit.elements().empty()) {
@@ -69,14 +65,12 @@ void flattenLiteral(shalimar::ArrayLit &lit, std::vector<shalimar::Expr *> *out)
     }
 }
 
-}  // namespace
+}
 
 SToC::SToC(const Source &source, Diagnostics &diagnostics)
     : source_(source) {
     (void)diagnostics;
 }
-
-// ------------------------------------------------------------------ helpers
 
 std::string SToC::sanitise(const std::string &name) {
     if (isCKeyword(name) || name.compare(0, 4, "c2s_") == 0) return name + "_v";
@@ -111,8 +105,7 @@ const SToC::Info *SToC::lookupVar(const shalimar::Var &var) {
 }
 
 std::string SToC::cEscape(const std::string &text) {
-    // Shalimar strings carry no escapes, so every character is literal; the
-    // C spelling has to escape what C would misread.
+
     std::string out;
     for (std::size_t i = 0; i < text.size(); ++i) {
         const char c = text[i];
@@ -178,9 +171,6 @@ CExprPtr SToC::callHelper(const std::string &name, std::vector<CExprPtr> args) {
     return CExprPtr(call.release());
 }
 
-// The value of one dimension of an array: a literal for a local whose
-// extents were constant, the rider parameter for an array that arrived as
-// one.
 CExprPtr SToC::dimValue(const Info &info, int axis) {
     if (info.isParamArray) {
         char suffix[16];
@@ -193,13 +183,9 @@ CExprPtr SToC::dimValue(const Info &info, int axis) {
     return intLit(0);
 }
 
-// Walks an Index chain down to its Var, converts every index expression,
-// and builds the linearised C index. Returns the flat element expression -
-// or, for a partial chain, the pointer to the slice - and says how many
-// ranks remain unconsumed.
 CExprPtr SToC::linearIndex(shalimar::Expr &chain, int *outRankLeft,
                            const Info **outInfo) {
-    // Collect the chain outside-in.
+
     std::vector<shalimar::Index *> steps;
     shalimar::Expr *walk = &chain;
     while (shalimar::Index *step = dynamic_cast<shalimar::Index *>(walk)) {
@@ -218,13 +204,11 @@ CExprPtr SToC::linearIndex(shalimar::Expr &chain, int *outRankLeft,
     }
     *outInfo = info;
 
-    // Innermost step first in source reading order.
     std::vector<CExprPtr> indices;
     for (std::size_t i = steps.size(); i > 0; --i) {
         indices.push_back(expression(steps[i - 1]->index()));
     }
 
-    // offset = ((i0 * d1 + i1) * d2 + i2) ...
     CExprPtr offset;
     for (std::size_t axis = 0; axis < indices.size(); ++axis) {
         if (offset == nullptr) {
@@ -236,7 +220,6 @@ CExprPtr SToC::linearIndex(shalimar::Expr &chain, int *outRankLeft,
         }
     }
 
-    // A full chain lands on an element; a partial one on a slice pointer.
     const int consumed = static_cast<int>(steps.size());
     *outRankLeft = info->rank - consumed;
 
@@ -245,7 +228,6 @@ CExprPtr SToC::linearIndex(shalimar::Expr &chain, int *outRankLeft,
         return element;
     }
 
-    // The slice starts at offset * (product of remaining dims).
     CExprPtr stride;
     for (int axis = consumed; axis < info->rank; ++axis) {
         CExprPtr dim = dimValue(*info, axis);
@@ -267,15 +249,13 @@ CStmtPtr SToC::declStmtFor(const std::string &name, CTypePtr type, CExprPtr init
     return CStmtPtr(new CDeclStmt(std::move(decl)));
 }
 
-// -------------------------------------------------------------- expressions
-
 CExprPtr SToC::expression(shalimar::Expr &node) {
     CExprPtr saved = std::move(expr_);
     expr_.reset();
     node.accept(*this);
     CExprPtr result = std::move(expr_);
     expr_ = std::move(saved);
-    if (result == nullptr) result = intLit(0);   // after a marker; keeps the tree whole
+    if (result == nullptr) result = intLit(0);
     return result;
 }
 
@@ -290,7 +270,7 @@ void SToC::visit(shalimar::RealLit &node) {
 
 void SToC::visit(shalimar::Var &node) {
     if (node.isNamedConstant()) {
-        // pi and e, resolved by the checker to their values.
+
         const std::string spelling = SPrinter::spellReal(node.constant());
         expr_.reset(new CFloatLit(node.constant(), spelling));
         return;
@@ -321,8 +301,6 @@ void SToC::visit(shalimar::Binary &node) {
     const bool realOperands =
         operands != nullptr && operands->kind() == shalimar::Type::Kind::Real;
 
-    // Text operations - join and the six comparisons on char[] - need the
-    // runtime's terminator semantics and are not carried yet.
     if (operands != nullptr && operands->isArray()) {
         markBeyond(0, std::string("the '") + shalimar::Binary::spelling(node.op()) +
                           "' operator on text has no C89 translation here yet");
@@ -358,10 +336,7 @@ void SToC::visit(shalimar::Binary &node) {
     }
 
     if (node.op() == Op::And || node.op() == Op::Or) {
-        // Shalimar's '&' and '|' evaluate both sides - the README says so in
-        // as many words - so C's short-circuit '&&' would be a lie. Bitwise
-        // '&' and '|' over the 0-or-1 of two truth tests evaluate both and
-        // answer the same 0 or 1.
+
         CExprPtr lhs(new CBinary("!=", expression(node.lhs()), intLit(0)));
         CExprPtr rhs(new CBinary("!=", expression(node.rhs()), intLit(0)));
         expr_.reset(new CBinary(node.op() == Op::And ? "&" : "|",
@@ -369,17 +344,6 @@ void SToC::visit(shalimar::Binary &node) {
         return;
     }
 
-    // Shalimar makes passing the int limit a runtime error; C89 wraps and
-    // says nothing. Left alone, a program that stops under shc runs to the
-    // end after conversion printing wrapped negatives - the one thing this
-    // converter was known to translate into a different answer rather than
-    // refuse. So int '+', '-' and '*' go through helpers that check first
-    // and stop the same way, with the same words on the same stream.
-    //
-    // Reals are untouched: Shalimar's reals overflow to infinity exactly as
-    // C's doubles do, and there is nothing to check. Divide and modulus are
-    // untouched too - their trap is a different one, and 'INT_MIN / -1' is
-    // worth doing deliberately rather than in passing.
     const bool intOperands =
         operands != nullptr && operands->kind() == shalimar::Type::Kind::Int;
     if (intOperands && (node.op() == Op::Add || node.op() == Op::Subtract ||
@@ -416,13 +380,12 @@ void SToC::visit(shalimar::Binary &node) {
 }
 
 void SToC::visit(shalimar::StrLit &node) {
-    // Reaches here only outside the two places a string is carried (an
-    // initialiser, a print item), which the statement paths intercept.
+
     expr_.reset(new CStringLit(node.text(), "\"" + cEscape(node.text()) + "\""));
 }
 
 void SToC::visit(shalimar::ArrayLit &) {
-    // Intercepted by Declare; anywhere else has no direct C shape.
+
     markBeyond(0, "an array literal outside a declaration");
     expr_.reset();
 }
@@ -441,7 +404,7 @@ void SToC::visit(shalimar::Index &node) {
         return;
     }
     if (rankLeft != 0) {
-        // A slice used as a value; only whole elements are values in C.
+
         markBeyond(0, "a partial index used as a value");
         expr_.reset();
         return;
@@ -468,15 +431,13 @@ void SToC::visit(shalimar::Dim &node) {
 }
 
 void SToC::visit(shalimar::Precision &) {
-    // Only meaningful inside a print list; printItem handles it there.
+
     markBeyond(0, "'prec' outside a print list");
     expr_.reset();
 }
 
 void SToC::visit(shalimar::Call &node) {
-    // A builtin maps to C's math library or to an emitted helper; a user
-    // function keeps its name. Multi-output calls stand only under
-    // MultiAssign, which handles them before coming here.
+
     std::unique_ptr<CCall> call;
 
     if (node.builtin() >= 0) {
@@ -505,7 +466,7 @@ void SToC::visit(shalimar::Call &node) {
         else if (name == "round") cName = "c2s_round";
         else if (name == "trunc") cName = "c2s_trunc";
         else if (name == "hypot") cName = "c2s_hypot";
-        else cName = name;                    // sqrt, sin, cos, ... exist in C90
+        else cName = name;
 
         if (cName.compare(0, 4, "c2s_") == 0) {
             need(cName);
@@ -525,7 +486,6 @@ void SToC::visit(shalimar::Call &node) {
         shalimar::Expr &argument = *arguments[i];
         const shalimar::Type *type = argument.type();
 
-        // An array argument travels flattened: pointer plus its dims.
         if (type != nullptr && type->isArray()) {
             shalimar::Var *var = dynamic_cast<shalimar::Var *>(&argument);
             const Info *info = var != nullptr ? lookupVar(*var) : nullptr;
@@ -541,7 +501,6 @@ void SToC::visit(shalimar::Call &node) {
             continue;
         }
 
-        // '&x' reference parameters take the address of the caller's variable.
         const bool byReference =
             proto != nullptr && i < proto->inputs.size() &&
             proto->inputs[i].byReference &&
@@ -557,11 +516,8 @@ void SToC::visit(shalimar::Call &node) {
     expr_.reset(call.release());
 }
 
-// --------------------------------------------------------------- statements
-
 void SToC::statement(shalimar::Stmt &node) {
-    // Every expression below this belongs to this statement, and the
-    // Shalimar runtime reports an overflow against the statement's line.
+
     if (node.line() > 0) currentLine_ = node.line();
     node.accept(*this);
 }
@@ -587,7 +543,6 @@ void SToC::visit(shalimar::Declare &node) {
         return;
     }
 
-    // An array local: extents must fold to constants for a C89 array.
     long long total = 1;
     for (std::size_t i = 0; i < node.extents().size(); ++i) {
         long long extent = 0;
@@ -595,7 +550,7 @@ void SToC::visit(shalimar::Declare &node) {
             markBeyond(node.line(),
                        "an array extent that is not a constant - C89 sizes arrays at "
                        "compile time");
-            symbols_[symbol] = info;   // known, but unusable; uses will mark
+            symbols_[symbol] = info;
             return;
         }
         info.extents.push_back(extent);
@@ -603,9 +558,6 @@ void SToC::visit(shalimar::Declare &node) {
     }
     symbols_[symbol] = info;
 
-    // 'char s[32] : "hello"' keeps C's own initialiser; other initials
-    // flatten an ArrayLit row-major, blanks as zero; no initial zero-fills,
-    // which is what a Shalimar declared array holds too.
     CTypePtr arrayType(new CType(CType::Kind::Array));
     arrayType->setLength(std::unique_ptr<CNode>(intLit(total).release()));
     arrayType->setBase(scalarC(node.declaredType()));
@@ -622,7 +574,7 @@ void SToC::visit(shalimar::Declare &node) {
                 text->text(), "\"" + cEscape(text->text()) + "\""))));
         } else if (shalimar::ArrayLit *literal =
                        dynamic_cast<shalimar::ArrayLit *>(node.initial().get())) {
-            // Flatten row-major; nested literals recurse.
+
             std::unique_ptr<CInit> init(new CInit());
             struct Flattener {
                 SToC *self;
@@ -645,8 +597,7 @@ void SToC::visit(shalimar::Declare &node) {
                                     "not a literal");
         }
     } else {
-        // Zero-fill to match Shalimar's declared arrays: '= {0}' fills the
-        // remainder with zeros in C89.
+
         std::unique_ptr<CInit> init(new CInit());
         init->add(CInit(intLit(0)));
         declarator.init = std::move(init);
@@ -657,8 +608,7 @@ void SToC::visit(shalimar::Declare &node) {
 }
 
 void SToC::visit(shalimar::Assign &node) {
-    // An array created from a literal was declared by the hoist pass; here
-    // the literal's leaves become element stores, row-major, blanks as zero.
+
     const shalimar::Type *type = node.target()->type();
     if (type != nullptr && type->isArray()) {
         shalimar::ArrayLit *literal =
@@ -682,7 +632,7 @@ void SToC::visit(shalimar::Assign &node) {
 
     if (node.creates() && node.symbol() != nullptr &&
         symbols_.find(node.symbol()) == symbols_.end()) {
-        // Hoisted: convertFunction declared it at the top; record the name.
+
         Info info;
         info.cName = sanitise(node.symbol()->name());
         symbols_[node.symbol()] = info;
@@ -722,8 +672,7 @@ void SToC::printItem(shalimar::Expr &item) {
 
     const shalimar::Type *type = item.type();
     if (type != nullptr && type->isArray()) {
-        // A named array, or a partial index of one, prints as the runtime
-        // prints it: text inline, numbers as a right-aligned grid.
+
         const Info *info = nullptr;
         CExprPtr data;
         int rankLeft = 0;
@@ -790,10 +739,9 @@ void SToC::visit(shalimar::Print &node) {
 }
 
 void SToC::visit(shalimar::If &node) {
-    // if / elseif chains nest rightward as C's else-if does.
+
     std::vector<shalimar::If::Branch> &branches = node.branches();
 
-    // Build from the last branch backwards so each else holds the rest.
     CStmtPtr elseArm;
     if (node.hasElse()) {
         std::unique_ptr<CCompound> body(new CCompound());
@@ -820,14 +768,7 @@ void SToC::visit(shalimar::While &node) {
 }
 
 void SToC::visit(shalimar::For &node) {
-    // The counter is loop-local in Shalimar, so the whole loop sits in a C
-    // block of its own with the counter and the once-evaluated bounds
-    // declared at its top.
-    //
-    // An int counter strides exactly, so the plain C for suffices and
-    // 'continue' still advances it - the step lives in the for header. A
-    // real counter is computed as start + pass * step, the way the app's
-    // interpreter does, so the last digits cannot drift.
+
     const shalimar::Symbol *counter = node.counter();
     const bool realCounter =
         counter != nullptr &&
@@ -860,7 +801,6 @@ void SToC::visit(shalimar::For &node) {
         wrap->add(declStmtFor(passName, std::move(longType), nullptr));
     }
 
-    // Bounds evaluated once, in source order: start, end, step.
     wrap->add(CStmtPtr(new CExprStmt(CExprPtr(new CAssign(
         "=", ident(startName), expression(*node.start()))))));
     wrap->add(CStmtPtr(new CExprStmt(CExprPtr(new CAssign(
@@ -869,7 +809,6 @@ void SToC::visit(shalimar::For &node) {
         "=", ident(stepName),
         node.step() != nullptr ? expression(*node.step()) : intLit(1))))));
 
-    // while (step >= 0 ? i <= end : i >= end)
     CExprPtr keepGoing(new CTernary(
         CExprPtr(new CBinary(">=", ident(stepName), intLit(0))),
         CExprPtr(new CBinary("<=", ident(info.cName), ident(endName))),
@@ -885,7 +824,7 @@ void SToC::visit(shalimar::For &node) {
         wrap->add(CStmtPtr(new CFor(std::move(init), std::move(keepGoing),
                                     std::move(step), CStmtPtr(body.release()))));
     } else {
-        // for (pass = 0; ; ++pass) { i = start + pass * step; if (!keep) break; body }
+
         std::unique_ptr<CCompound> loop(new CCompound());
         loop->add(CStmtPtr(new CExprStmt(CExprPtr(new CAssign(
             "=", ident(info.cName),
@@ -924,13 +863,12 @@ void SToC::visit(shalimar::Return &node) {
     if (exprs.size() <= 1) {
         CExprPtr value;
         if (exprs.size() == 1) value = expression(*exprs[0]);
-        // Shalimar's main returns nothing; C's returns its exit status.
+
         if (currentIsMain_ && value == nullptr) value = intLit(0);
         block_->add(CStmtPtr(new CReturn(std::move(value))));
         return;
     }
-    // 'return (a, b)' in a multi-output function stores through the
-    // out-pointers this converter added to the signature, then returns.
+
     for (std::size_t i = 0; i < exprs.size(); ++i) {
         char name[24];
         std::snprintf(name, sizeof name, "c2s_out%d", static_cast<int>(i) + 1);
@@ -948,8 +886,6 @@ void SToC::visit(shalimar::MultiAssign &node) {
         return;
     }
 
-    // Targets that this assignment created were hoisted by convertFunction;
-    // record their names.
     std::vector<const shalimar::Symbol *> &targets = node.targets();
     for (std::size_t i = 0; i < targets.size(); ++i) {
         if (targets[i] != nullptr && symbols_.find(targets[i]) == symbols_.end()) {
@@ -959,10 +895,9 @@ void SToC::visit(shalimar::MultiAssign &node) {
         }
     }
 
-    // The call converts as usual, then grows one '&target' per output.
     CExprPtr converted = expression(*call);
     CCall *ccall = dynamic_cast<CCall *>(converted.get());
-    if (ccall == nullptr) return;          // a marker already spoke
+    if (ccall == nullptr) return;
 
     const std::vector<std::string> &names = node.names();
     for (std::size_t i = 0; i < names.size(); ++i) {
@@ -986,14 +921,10 @@ void SToC::visit(shalimar::CallStmt &node) {
     block_->add(CStmtPtr(new CExprStmt(std::move(converted))));
 }
 
-// ----------------------------------------------------------------- program
-
 void SToC::convertFunction(shalimar::Function &fn) {
     currentFn_ = &fn;
     const shalimar::Prototype &proto = fn.proto();
 
-    // The signature. One output returns itself; several return void and
-    // arrive through out-pointers appended after the declared parameters.
     CTypePtr fnType(new CType(CType::Kind::Function));
     if (proto.outputs.size() == 1) {
         fnType->setBase(scalarC(proto.outputs[0]));
@@ -1005,13 +936,6 @@ void SToC::convertFunction(shalimar::Function &fn) {
     if (isMain) fnType->setBase(basic(CType::Kind::Int));
     if (proto.inputs.empty() && proto.outputs.size() <= 1) fnType->setProtoVoid();
 
-    // Parameters - and the Info records their bodies will read.
-    // Symbols for parameters: the checker declared them in the function;
-    // Var nodes resolve to them, so the Info map is keyed by name through
-    // the first Var that arrives. Parameters are declared by declareName in
-    // the checker before the body walks, and their symbols are reachable
-    // only through the Vars, so the map fills lazily: here the names and
-    // shapes are decided, and visit(Var) matches on name.
     paramInfos_.clear();
     for (std::size_t i = 0; i < proto.inputs.size(); ++i) {
         const shalimar::Param &param = proto.inputs[i];
@@ -1062,13 +986,10 @@ void SToC::convertFunction(shalimar::Function &fn) {
 
     std::unique_ptr<CCompound> body(new CCompound());
 
-    // Names created by assignment live for the whole call in Shalimar, so
-    // they are declared at the top here - C89 wants that anyway. The walk
-    // finds them: creations and multi-assign targets, at any depth.
     struct Hoist : public shalimar::NodeVisitor {
         SToC *self;
         CCompound *top;
-        bool collecting;                       // pass one gathers Declares
+        bool collecting;
         std::map<const shalimar::Symbol *, bool> declared;
         std::map<const shalimar::Symbol *, bool> seen;
 
@@ -1182,8 +1103,7 @@ std::unique_ptr<CProgram> SToC::convert(shalimar::Program &program) {
             if (fn.isRejected()) continue;
             convertFunction(fn);
         } else {
-            // A global Declare. Constant scalars and constant-extent arrays
-            // carry; anything needing the initializer frame does not, yet.
+
             shalimar::Stmt &global = *program.globals()[entry.index];
             std::unique_ptr<CCompound> holder(new CCompound());
             CCompound *saved = block_;
@@ -1197,17 +1117,7 @@ std::unique_ptr<CProgram> SToC::convert(shalimar::Program &program) {
                         new CDeclaration(std::move(decl->decl())));
                     program_->add(std::move(lifted));
                 } else if (dynamic_cast<CBeyond *>(made[k].get()) != nullptr) {
-                    // A refusal that stood at file scope. This used to be
-                    // dropped here - the count had already gone up, so the
-                    // run said "1 construct has no expression in the target
-                    // language, and each is marked where it stands in the
-                    // output" over a file with no marker in it at all. What
-                    // was left was a C program missing a declaration, and
-                    // nothing pointed at where it had been.
-                    //
-                    // The C-to-Shalimar direction learned this and its
-                    // markBeyond has carried a program-level fallback since;
-                    // this side had the same hole and no case to find it.
+
                     program_->addMarker(std::move(made[k]));
                 }
             }
@@ -1217,8 +1127,6 @@ std::unique_ptr<CProgram> SToC::convert(shalimar::Program &program) {
     sProgram_ = nullptr;
     return std::move(program_);
 }
-
-// ------------------------------------------------------- emitted C runtime
 
 std::vector<std::string> SToC::includes() const {
     std::vector<std::string> out;
@@ -1246,10 +1154,7 @@ std::vector<std::string> SToC::includes() const {
 }
 
 std::string SToC::preamble() const {
-    // The pieces are emitted in dependency order; each replicates the
-    // corresponding function of Compiler-S's runtime (runtime/Console.cpp,
-    // runtime/Numbers.cpp) closely enough to be byte-identical on the
-    // output the differential suite compares.
+
     std::string out;
     const bool grids = helpers_.count("c2s_print_grid1_real") != 0 ||
                        helpers_.count("c2s_print_grid2_real") != 0 ||
@@ -1313,10 +1218,7 @@ std::string SToC::preamble() const {
             "}\n";
     }
     if (grids) {
-        // One worker prints any rank-1 or rank-2 grid: cells are spelled
-        // first, the widest sets the column, columns join with two spaces,
-        // rows with a newline, and a multi-row grid starts on a fresh line
-        // when something already stands on this one - Console.cpp's rule.
+
         out +=
             "static void c2s_grid(const double *reals, const int *ints,\n"
             "                     int rows, int cols) {\n"
@@ -1384,17 +1286,7 @@ std::string SToC::preamble() const {
             "    c2s_grid_places = places;\n"
             "}\n";
     }
-    // One trap per operator, each carrying its own whole message, rather
-    // than one taking the operator as a string.
-    //
-    // That is not a style choice. cc1 refuses a string literal whose entire
-    // content is a single character that could begin an expression -
-    // "*", "+" and "(" are all turned away with "expected an expression",
-    // while "/", "%" and "z" are fine - so c2s_overflow(line, "*") does not
-    // compile under the very compiler this output is written for. Inside a
-    // longer string the same character is unremarkable, which is what these
-    // three do. Recorded here because it is a fault in the oracle, not in
-    // the converter, and the shape of it is easy to trip over again.
+
     static const struct { const char *helper; const char *trap; const char *op; }
         kTraps[] = {
             {"c2s_add_int", "c2s_overflow_add", "+"},
@@ -1403,9 +1295,7 @@ std::string SToC::preamble() const {
         };
     for (std::size_t i = 0; i < sizeof kTraps / sizeof kTraps[0]; ++i) {
         if (helpers_.count(kTraps[i].helper) == 0) continue;
-        // The message, the stream and the status are the Shalimar runtime's,
-        // because a differential run compares what the two programs printed:
-        // it goes to stdout, not stderr, and the program leaves with 1.
+
         out += std::string("static void ") + kTraps[i].trap + "(int line) {\n" +
                "    printf(\"Error: line %d: int overflow in '" + kTraps[i].op +
                "' - use real\\n\", line);\n"
@@ -1429,9 +1319,7 @@ std::string SToC::preamble() const {
             "}\n";
     }
     if (helpers_.count("c2s_mul_int") != 0) {
-        // Checked by division rather than in a wider type: C89 has no long
-        // long to widen into, so the question is asked of the operands
-        // before the multiply rather than of the answer after it.
+
         out +=
             "static int c2s_mul_int(int a, int b, int line) {\n"
             "    if (a > 0) {\n"
@@ -1486,4 +1374,4 @@ std::string SToC::preamble() const {
     return out;
 }
 
-}  // namespace c2s
+}

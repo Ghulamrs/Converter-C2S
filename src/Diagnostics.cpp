@@ -20,8 +20,6 @@ const char *spellingOf(Severity severity) {
 
 namespace {
 
-// The gutter is as wide as the widest line number it will hold, so a file of
-// nine lines does not print a five-column margin.
 std::string gutter(int lineNo, std::size_t width) {
     std::ostringstream out;
     std::ostringstream number;
@@ -45,8 +43,6 @@ std::size_t widthOf(int lineNo) {
     return number.str().size();
 }
 
-// A tab in the quoted line has to become a tab under the caret too, or the
-// caret lands somewhere the reader's terminal did not put the character.
 std::string caretRow(const std::string &line, int column) {
     std::string row;
     const int stop = column > 0 ? column - 1 : 0;
@@ -61,7 +57,7 @@ std::string caretRow(const std::string &line, int column) {
     return row;
 }
 
-}  // namespace
+}
 
 std::string Diagnostic::formatted() const {
     std::ostringstream out;
@@ -131,7 +127,7 @@ std::string plural(int n, const char *one, const char *many) {
     return out.str();
 }
 
-}  // namespace
+}
 
 std::string Diagnostics::summary() const {
     if (messages_.empty()) return "no diagnostics";
@@ -166,4 +162,4 @@ std::string Diagnostics::summary() const {
     return out;
 }
 
-}  // namespace c2s
+}

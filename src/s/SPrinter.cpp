@@ -12,8 +12,6 @@ namespace c2s {
 
 SPrinter::SPrinter() : depth_(0), floor_(TierOr) {}
 
-// ------------------------------------------------------------------ helpers
-
 SPrinter::Tier SPrinter::tierOf(shalimar::Binary::Op op) {
     using Op = shalimar::Binary::Op;
     switch (op) {
@@ -36,10 +34,7 @@ SPrinter::Tier SPrinter::tierOf(shalimar::Binary::Op op) {
 }
 
 std::string SPrinter::spellReal(double value) {
-    // The shortest spelling strtod reads back to the same bits, which is what
-    // Compiler-S's own lexer does with it (Lexer.cpp, number()). Then a form
-    // with neither a point nor an exponent gets '.0' appended, because bare
-    // digits would lex as an int and the node said real.
+
     char buffer[64];
     for (int precision = 1; precision <= 17; ++precision) {
         std::snprintf(buffer, sizeof buffer, "%.*g", precision, value);
@@ -73,8 +68,6 @@ void SPrinter::expr(shalimar::Expr &node, int floor) {
     floor_ = saved;
 }
 
-// -------------------------------------------------------------- expressions
-
 void SPrinter::visit(shalimar::IntLit &node) {
     char buffer[16];
     std::snprintf(buffer, sizeof buffer, "%d", static_cast<int>(node.value()));
@@ -90,8 +83,7 @@ void SPrinter::visit(shalimar::Var &node) {
 }
 
 void SPrinter::visit(shalimar::Convert &node) {
-    // The target type is the node's own type(), set at construction whether
-    // the conversion was written or inserted by the checker.
+
     const shalimar::Type *to = node.type();
     out_ += to != nullptr ? to->spelling() : "int";
     out_ += '(';
@@ -104,9 +96,6 @@ void SPrinter::visit(shalimar::Binary &node) {
     const bool parens = tier < floor_;
     if (parens) out_ += '(';
 
-    // Every tier is left-associative except power, which is right - '2^3^2'
-    // is 2^(3^2). A left operand of '^' therefore needs parentheses even at
-    // its own tier, and a right operand of anything else does.
     const bool rightAssociative = node.op() == shalimar::Binary::Op::Power;
     const int leftFloor = rightAssociative ? tier + 1 : tier;
     const int rightFloor = rightAssociative ? tier : tier + 1;
@@ -121,9 +110,7 @@ void SPrinter::visit(shalimar::Binary &node) {
 }
 
 void SPrinter::visit(shalimar::StrLit &node) {
-    // Shalimar strings have no escapes: the characters between the quotes are
-    // the string. A text holding a quote or a newline cannot be written, and
-    // the conversion pass refuses it before it gets here.
+
     out_ += '"';
     out_ += node.text();
     out_ += '"';
@@ -140,7 +127,7 @@ void SPrinter::visit(shalimar::ArrayLit &node) {
 }
 
 void SPrinter::visit(shalimar::Blank &) {
-    // The gap in '{1.0,,}': nothing between the commas.
+
 }
 
 void SPrinter::visit(shalimar::Index &node) {
@@ -158,7 +145,7 @@ void SPrinter::visit(shalimar::Dim &node) {
         expr(*node.axis(), TierOr);
         out_ += ')';
     } else {
-        out_ += node.spelling();       // "row" or "col"
+        out_ += node.spelling();
     }
 }
 
@@ -179,12 +166,8 @@ void SPrinter::visit(shalimar::Call &node) {
     out_ += ')';
 }
 
-// --------------------------------------------------------------- statements
-
 void SPrinter::declare(shalimar::Declare &node) {
-    // The declared type may already be wrapped once per extent by the
-    // checker; the written form wants the scalar, with the extents as their
-    // own bracketed expressions after the name.
+
     const shalimar::Type *type = node.declaredType();
     std::string text = type->scalar()->spelling();
     text += ' ';
@@ -226,10 +209,7 @@ void SPrinter::visit(shalimar::CompoundAssign &node) {
 }
 
 void SPrinter::visit(shalimar::Print &node) {
-    // The whole statement owns its line, which is rule one of the two layout
-    // rules. Rule two is shc's statement-boundary scan: an item that BEGINS
-    // with an identifier followed by '=' would be read as the start of an
-    // assignment statement, so such an item is wrapped in parentheses.
+
     indent();
     out_ += node.newline() ? "?" : "?\?";
     std::vector<shalimar::ExprPtr> &items = node.items();
@@ -327,8 +307,7 @@ void SPrinter::visit(shalimar::While &node) {
 }
 
 void SPrinter::visit(shalimar::For &node) {
-    // Both written forms arrived as this one node; the canonical spelling is
-    // the explicit one, and 'for i < n' is already 'for i : 0 to n - 1'.
+
     indent();
     out_ += "for ";
     out_ += node.variable();
@@ -354,19 +333,10 @@ void SPrinter::visit(shalimar::Continue &) {
     line("continue");
 }
 
-// ------------------------------------------------------------------ program
-
 void SPrinter::statement(shalimar::Stmt &node) {
-    // SBeyondStmt is recognised here by type rather than dispatched to.
-    // Compiler-S's NodeVisitor is a closed list this converter must not
-    // edit, so the node's accept() is empty - which means that without this
-    // check it accepts into nothing and the refusal disappears, leaving a
-    // smaller program behind that compiles perfectly well. That is the one
-    // outcome a converter must never produce.
+
     if (SBeyondStmt *marker = dynamic_cast<SBeyondStmt *>(&node)) {
-        // Shalimar has line comments and nothing else - a '/* */' block
-        // like the C side prints would lex as a divide and a multiply - so
-        // every line of the marker carries its own '//'.
+
         line("// #BEYOND SHALIMAR: " + marker->reason());
         const std::vector<std::string> &lines = marker->lines();
         for (std::size_t i = 0; i < lines.size(); ++i) {
@@ -396,8 +366,7 @@ void SPrinter::functionHeader(const shalimar::Prototype &proto) {
     for (std::size_t i = 0; i < proto.inputs.size(); ++i) {
         if (i > 0) out_ += ", ";
         const shalimar::Param &param = proto.inputs[i];
-        // 'a[]: char', 'R[][]: real', '&x: int'. An array is a reference
-        // always, so '&' is written only for the scalar that asked for it.
+
         const shalimar::Type *type = param.type;
         const int rank = type != nullptr ? type->rank() : 0;
         if (param.byReference && rank == 0) out_ += '&';
@@ -413,8 +382,6 @@ std::string SPrinter::print(shalimar::Program &program) {
     out_.clear();
     depth_ = 0;
 
-    // Top-level order is meaning in Shalimar - a global is visible below the
-    // line that declares it - so the recorded order is the printed order.
     const std::vector<shalimar::Program::Entry> &order = program.order();
     bool first = true;
     for (std::size_t i = 0; i < order.size(); ++i) {
@@ -445,4 +412,4 @@ std::string SPrinter::printExpr(shalimar::Expr &node) {
     return result;
 }
 
-}  // namespace c2s
+}

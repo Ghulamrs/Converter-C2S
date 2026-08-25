@@ -7,16 +7,6 @@
 
 namespace c2s {
 
-// CProgram back to C89 text.
-//
-// The output is canonical - four-space indentation, one declaration per
-// line kept as written, every literal in its original spelling - and
-// compiles under cc1, which is the printer's real contract: the differential
-// suite compiles what this prints and runs it against the original.
-//
-// Parentheses are re-derived from C's precedence table rather than
-// remembered, so a printed expression may drop redundant parentheses the
-// source wrote; it never drops needed ones.
 class CPrinter : public CVisitor {
 public:
     CPrinter();
@@ -24,8 +14,6 @@ public:
     std::string print(CProgram &program);
     std::string printExpr(CExpr &expr);
 
-    // One declarator's full declaration text, "int (*f)(int, int)" - shared
-    // with diagnostics that want to name a declaration precisely.
     static std::string declaration(const CType &type, const std::string &name);
 
     void visit(CIntLit &) override;
@@ -61,7 +49,7 @@ public:
     void visit(CBeyond &) override;
 
 private:
-    // C's precedence, as levels this printer compares; higher binds tighter.
+
     enum {
         PrecComma = 1,
         PrecAssign = 2,
@@ -84,7 +72,7 @@ private:
 
     void expr(CExpr &node, int floor);
     void stmt(CStmt &node);
-    void child(CStmt &node);           // a statement under if/while/for
+    void child(CStmt &node);
     void printDecl(CDeclaration &decl);
     void printInit(CInit &init);
     static std::string typeText(const CType &type, const std::string &inner);
@@ -97,6 +85,6 @@ private:
     int floor_;
 };
 
-}  // namespace c2s
+}
 
 #endif

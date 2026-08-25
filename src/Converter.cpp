@@ -41,9 +41,6 @@ Converter::Result Converter::convert(const std::string &sourceText,
             return result;
         }
 
-        // The #defines that name a value go in where they were written.
-        // After lexing, so that the offsets a diagnostic quotes by still
-        // point into the file the author edited - see CMacro.h.
         if (!expandMacros(prescan.macros(), lexed.tokens, source, diagnostics)) {
             result.diagnostics = diagnostics.messages();
             result.summary = diagnostics.summary();
@@ -122,7 +119,7 @@ Converter::Result Converter::canonicalise(const std::string &sourceText,
     Source source(name, sourceText);
 
     if (direction == Direction::ShalimarToC) {
-        // Shalimar in, canonical Shalimar out.
+
         SFrontEnd frontEnd;
         std::unique_ptr<shalimar::Program> program =
             frontEnd.parseAndCheck(source, diagnostics);
@@ -135,8 +132,7 @@ Converter::Result Converter::canonicalise(const std::string &sourceText,
         result.output = printer.print(*program);
         result.ok = true;
     } else {
-        // C in, canonical C out, with the recorded #include lines restored
-        // so the result still compiles under cc1.
+
         CPreScan prescan;
         if (!prescan.run(source, diagnostics)) {
             result.questions = prescan.pending();
@@ -153,9 +149,7 @@ Converter::Result Converter::canonicalise(const std::string &sourceText,
             result.summary = diagnostics.summary();
             return result;
         }
-        // The #defines that name a value go in where they were written.
-        // After lexing, so that the offsets a diagnostic quotes by still
-        // point into the file the author edited - see CMacro.h.
+
         if (!expandMacros(prescan.macros(), lexed.tokens, source, diagnostics)) {
             result.diagnostics = diagnostics.messages();
             result.summary = diagnostics.summary();
@@ -194,7 +188,7 @@ bool endsWith(const std::string &text, const std::string &suffix) {
     return text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
-}  // namespace
+}
 
 Converter::Result Converter::convertFile(const std::string &sourceText,
                                          const std::string &name,
@@ -218,4 +212,4 @@ Converter::Result Converter::convertFile(const std::string &sourceText,
     return convert(sourceText, name, direction, permissions);
 }
 
-}  // namespace c2s
+}

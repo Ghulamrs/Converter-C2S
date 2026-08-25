@@ -29,8 +29,6 @@ void CPrinter::expr(CExpr &node, int floor) {
     floor_ = saved;
 }
 
-// -------------------------------------------------------------------- types
-
 std::string CPrinter::specifierText(const CType &type) {
     std::string text;
     if (type.isConst()) text += "const ";
@@ -98,15 +96,12 @@ std::string CPrinter::specifierText(const CType &type) {
         case CType::Kind::Named:
             return text + type.tag();
         default:
-            return text;               // pointer/array/function never reach here
+            return text;
     }
 }
 
 std::string CPrinter::typeText(const CType &type, const std::string &inner) {
-    // The classic inside-out declarator build: pointers gather on the left,
-    // arrays and parameter lists on the right, and a pointer whose base is
-    // an array or a function needs the parentheses that C's precedence of
-    // declarators makes meaningful - 'int (*f)(int)' against 'int *f(int)'.
+
     switch (type.kind()) {
         case CType::Kind::Pointer: {
             std::string text = "*";
@@ -156,8 +151,6 @@ std::string CPrinter::declaration(const CType &type, const std::string &name) {
     return typeText(type, name);
 }
 
-// -------------------------------------------------------------- expressions
-
 void CPrinter::visit(CIntLit &node)    { out_ += node.spelling(); }
 void CPrinter::visit(CFloatLit &node)  { out_ += node.spelling(); }
 void CPrinter::visit(CCharLit &node)   { out_ += node.spelling(); }
@@ -170,8 +163,7 @@ void CPrinter::visit(CUnary &node) {
     if (parens || postfixParens) out_ += '(';
     if (node.prefix()) {
         out_ += node.op();
-        // '- -x' must not become '--x'; a space keeps the tokens apart
-        // whenever the operand starts with the same character.
+
         std::string kept;
         kept.swap(out_);
         expr(node.operand(), PrecUnary);
@@ -198,18 +190,18 @@ void CPrinter::visit(CBinary &node) {
     out_ += ' ';
     out_ += node.op();
     out_ += ' ';
-    expr(node.rhs(), precedence + 1);   // C's binaries are left-associative
+    expr(node.rhs(), precedence + 1);
     if (parens) out_ += ')';
 }
 
 void CPrinter::visit(CAssign &node) {
     const bool parens = PrecAssign < floor_;
     if (parens) out_ += '(';
-    expr(node.target(), PrecUnary);     // an lvalue; unary binds it safely
+    expr(node.target(), PrecUnary);
     out_ += ' ';
     out_ += node.op();
     out_ += ' ';
-    expr(node.value(), PrecAssign);     // right-associative
+    expr(node.value(), PrecAssign);
     if (parens) out_ += ')';
 }
 
@@ -230,7 +222,7 @@ void CPrinter::visit(CCall &node) {
     std::vector<CExprPtr> &args = node.args();
     for (std::size_t i = 0; i < args.size(); ++i) {
         if (i > 0) out_ += ", ";
-        expr(*args[i], PrecAssign);     // an argument is an assignment-expr
+        expr(*args[i], PrecAssign);
     }
     out_ += ')';
 }
@@ -281,8 +273,6 @@ void CPrinter::visit(CComma &node) {
     if (parens) out_ += ')';
 }
 
-// --------------------------------------------------------------- statements
-
 void CPrinter::printInit(CInit &init) {
     if (!init.isList()) {
         expr(*init.expr(), PrecAssign);
@@ -319,10 +309,7 @@ void CPrinter::printDecl(CDeclaration &decl) {
         if (i == 0) {
             out_ += typeText(*declarators[i].type, declarators[i].name);
         } else {
-            // Later declarators share the specifier; print only the shape
-            // around the name. Splitting one declaration into several would
-            // also be correct, but keeping the source's grouping reads as
-            // the file did.
+
             std::string whole = typeText(*declarators[i].type, declarators[i].name);
             const std::string spec = specifierText([&]() -> const CType & {
                 const CType *walk = declarators[i].type.get();
@@ -373,8 +360,7 @@ void CPrinter::visit(CCompound &node) {
 }
 
 void CPrinter::child(CStmt &node) {
-    // The statement under an if/while/for prints as a block when it is one,
-    // and indented one deeper when it is not.
+
     if (dynamic_cast<CCompound *>(&node) != nullptr) {
         stmt(node);
     } else {
@@ -419,9 +405,9 @@ void CPrinter::visit(CFor &node) {
     indent();
     out_ += "for (";
     if (node.init() != nullptr) {
-        // The init prints without its own line machinery.
+
         if (CDeclStmt *decl = dynamic_cast<CDeclStmt *>(node.init())) {
-            printDecl(decl->decl());       // ends with ';'
+            printDecl(decl->decl());
         } else if (CExprStmt *exprStmt = dynamic_cast<CExprStmt *>(node.init())) {
             expr(exprStmt->expr(), PrecComma);
             out_ += ';';
@@ -446,7 +432,7 @@ void CPrinter::visit(CSwitch &node) {
 }
 
 void CPrinter::visit(CCase &node) {
-    // A case label out-dents one level, the usual reading style.
+
     if (depth_ > 0) --depth_;
     indent();
     ++depth_;
@@ -488,7 +474,7 @@ void CPrinter::visit(CGoto &node) {
 }
 
 void CPrinter::visit(CLabel &node) {
-    // A label sits at the margin of its block.
+
     if (depth_ > 0) --depth_;
     indent();
     ++depth_;
@@ -509,8 +495,6 @@ void CPrinter::visit(CBeyond &node) {
     out_ += "*/\n";
 }
 
-// ------------------------------------------------------------------ program
-
 void CPrinter::stmt(CStmt &node) {
     node.accept(*this);
 }
@@ -524,7 +508,7 @@ std::string CPrinter::print(CProgram &program) {
     for (std::size_t i = 0; i < order.size(); ++i) {
         const CProgram::Entry &entry = order[i];
         if (entry.isMarker) {
-            // A refusal at file scope, printed where it stood.
+
             if (!first) out_ += '\n';
             stmt(*program.markers()[entry.index]);
             first = false;
@@ -556,4 +540,4 @@ std::string CPrinter::printExpr(CExpr &node) {
     return result;
 }
 
-}  // namespace c2s
+}

@@ -9,10 +9,6 @@ const Type *charArray() { return Type::arrayOf(Type::charType()); }
 
 bool isText(const Type *type) { return type == charArray(); }
 
-// Which functions the program calls, found by reading the tree rather than
-// by watching the checker resolve names. The difference is the order of the
-// diagnostics: 'never called' is known before any body has been typed, and
-// that is where the app reports it.
 class CallCollector : public NodeVisitor {
 public:
     std::vector<std::string> names;
@@ -60,7 +56,7 @@ public:
     }
 };
 
-}  // namespace
+}
 
 Symbol *Checker::declareName(const std::string &name, const Type *type) {
     if (!inGlobalScope_) return function_->declare(name, type);
@@ -89,8 +85,6 @@ void Checker::reportUndefined(const std::string &name) {
 bool Checker::check(Program &program) {
     program_ = &program;
 
-    // Every global with its line, so a name used above its declaration can
-    // say so. Each is removed as the walk reaches it.
     for (StmtPtr &s : program.globals()) {
         Declare &declaration = static_cast<Declare &>(*s);
         if (!laterGlobals_.count(declaration.name())) {
@@ -98,8 +92,6 @@ bool Checker::check(Program &program) {
         }
     }
 
-    // Functions are collected before any body is checked, so main() may call
-    // something written after it.
     int id = 0;
     for (std::unique_ptr<Function> &f : program.functions()) {
         f->proto().id = id++;
@@ -120,9 +112,7 @@ bool Checker::check(Program &program) {
             f->reject();
             continue;
         }
-        // The one clash contextual matching cannot resolve is a function
-        // named 'prec', which is refused outright rather than left silently
-        // unreachable.
+
         if (f->proto().name == "prec") {
             diag_.error(f->proto().unit, f->proto().line, "'prec' is reserved for '? prec(n)'");
             f->reject();
@@ -137,8 +127,6 @@ bool Checker::check(Program &program) {
     if (!entry) diag_.error(0, "No main() function defined");
     else entry->markCalled();
 
-    // Reported before any body is typed, which is where the app reports it -
-    // so the order of the two kinds of message matches.
     {
         CallCollector collector;
         for (std::unique_ptr<Function> &f : program.functions()) collector.walk(f->body());
@@ -153,11 +141,6 @@ bool Checker::check(Program &program) {
         }
     }
 
-    // In file order, so that a function written above a global cannot see it
-    // and a global's initializer can only reach the ones above it. The
-    // interpreter creates them in this order too; while the two disagreed, a
-    // program the checker had passed could still fail at run time on a name
-    // it had accepted.
     for (const Program::Entry &entry_ : program.order()) {
         if (entry_.isFunction) {
             check(*program.functions()[entry_.index]);
@@ -206,8 +189,6 @@ void Checker::check(Function &function) {
     function_ = nullptr;
 }
 
-// A block returns on every path if some statement in it does. An 'if' counts
-// only when it has an else and every branch returns.
 bool Checker::alwaysReturns(const Block &body) {
     for (const StmtPtr &s : body) {
         if (dynamic_cast<const Return *>(s.get())) return true;
@@ -233,10 +214,6 @@ const Type *Checker::typeOf(ExprPtr &expr) {
     return expr->type();
 }
 
-// Every implicit conversion in the language comes through here, in both
-// directions. int and real convert into each other; a char does not convert
-// into anything without being asked, which is the wall that keeps '? c'
-// printing a letter.
 void Checker::coerce(ExprPtr &expr, const Type *to) {
     const Type *from = expr->type();
     if (!to || !from || from == to) return;
@@ -256,10 +233,6 @@ void Checker::coerce(ExprPtr &expr, const Type *to) {
     expr.reset(new Convert(std::move(inner), to));
 }
 
-// int beside real widens to real. A char with a number keeps the char, which
-// is what refuses the mixture: an int will not convert into a char silently,
-// so the arithmetic rule below catches it and the comparison rule lets it
-// through as a character comparison.
 const Type *Checker::common(const Type *a, const Type *b) const {
     if (!a || !b) return nullptr;
     if (a == b) return a;
@@ -275,8 +248,6 @@ bool Checker::refuseConstant(const std::string &name, const char *what) {
     return true;
 }
 
-// --------------------------------------------------------------- expressions
-
 void Checker::visit(IntLit &node) { node.setType(Type::intType()); }
 void Checker::visit(RealLit &node) { node.setType(Type::realType()); }
 
@@ -286,8 +257,7 @@ void Checker::visit(StrLit &node) {
 }
 
 void Checker::visit(Blank &node) {
-    // A blank carries no type. Its place is fixed by the commas around it and
-    // its value is the zero of whatever the literal turns out to hold.
+
     node.setType(nullptr);
 }
 
@@ -355,8 +325,7 @@ void Checker::visit(Index &node) {
 void Checker::visit(Dim &node) {
     const Type *base = typeOf(node.base());
     const Type *axis = typeOf(node.axis());
-    // Asking a scalar is a type confusion rather than a rank one, so it is an
-    // error where an axis the array does not have is simply -1.
+
     if (base && !base->isArray()) {
         diag_.error(unit_, line_, "'." + node.spelling() + "' needs an array, not " +
                                base->spelling());
@@ -387,7 +356,6 @@ void Checker::visit(Binary &node) {
     const Type *right = typeOf(node.right());
     if (!left || !right) return;
 
-    // Two strings are the one array pairing the operators accept.
     if (isText(left) && isText(right)) {
         switch (node.op()) {
         case Binary::Op::Equal:
@@ -413,18 +381,13 @@ void Checker::visit(Binary &node) {
         diag_.error(unit_, line_, std::string("'") + Binary::spelling(node.op()) +
                                "' needs scalars, got " + left->spelling() +
                                " and " + right->spelling());
-        // The operands are still fitted to each other, which is what the app
-        // does and is why a second message follows this one. Two complaints
-        // about one line read as two facts about it rather than as a repeat.
+
         coerce(node.left(), common(left, right));
         coerce(node.right(), common(left, right));
         node.setType(Type::intType());
         return;
     }
 
-    // A char never joins arithmetic. That wall is what keeps '? c' printing a
-    // letter rather than a number; comparison and ordering stay legal, and
-    // '&' and '|' read truthiness, which every scalar has.
     switch (node.op()) {
     case Binary::Op::Add:
     case Binary::Op::Subtract:
@@ -505,8 +468,7 @@ void Checker::visit(Call &node) {
         const Param &parameter = proto.inputs[i];
 
         if (parameter.byReference || parameter.type->isArray()) {
-            // A reference must be addressable and must match exactly. A
-            // converted copy would silently stop being the caller's.
+
             if (!node.arguments()[i]->isAddressable() && !parameter.type->isArray()) {
                 diag_.error(unit_, line_, "Argument " + std::to_string(i + 1) + " of '" +
                                        node.callee() + "' needs a variable");
@@ -534,8 +496,6 @@ void Checker::visit(Call &node) {
     node.setType(proto.outputs.empty() ? nullptr : proto.outputs[0]);
 }
 
-// ---------------------------------------------------------------- statements
-
 void Checker::visit(Declare &node) {
     if (refuseConstant(node.name(), "declared")) return;
     if (scope_.definedHere(node.name()) || (inGlobalScope_ && globals_.count(node.name()))) {
@@ -558,9 +518,7 @@ void Checker::visit(Declare &node) {
             diag_.error(unit_, line_, "'" + node.name() + "': size must be int, not " +
                                    given->spelling());
         }
-        // A size the checker can fold is refused before the program runs; one
-        // that genuinely depends on a variable is checked at run time, where
-        // the message can afford to report the value it computed.
+
         double folded = 0.0;
         if (constantNumber(*extent, folded) && folded < 1) {
             diag_.error(unit_, line_, "'" + node.name() + "': size must be 1 or more, got " +
@@ -588,8 +546,7 @@ void Checker::visit(Declare &node) {
     Symbol *symbol = declareName(node.name(), type);
     if (!inGlobalScope_) {
         scope_.define(node.name(), symbol);
-        // A local of the same name as a global is legal and shadows it, but
-        // it is almost always a slip.
+
         if (globals_.count(node.name())) {
             diag_.warning(unit_, line_, "'" + node.name() + "' hides a global");
         }
@@ -603,27 +560,12 @@ void Checker::visit(Assign &node) {
         const Type *target = typeOf(node.target());
         if (!target) return;
 
-        // The literal is looked for before the expression is typed, and the
-        // order is the whole of it. typeOf on {7, 2.5} types the literal by
-        // its own contents - int[], the 2.5 truncated to fit - and coercing
-        // that to a real row afterwards only widens the 2 back to 2.0. The
-        // whole-variable path below has always tested for a literal first for
-        // this reason; doing it second here cost a 2.5 and one test.
         if (target->isArray()) {
             if (ArrayLit *literal = dynamic_cast<ArrayLit *>(node.expr().get())) {
                 coerceLiteral(*literal, target);
                 return;
             }
 
-            // Not a literal, so the right side is an ordinary expression and
-            // has to be typed like one. Returning here without doing that
-            // left every Var in it unresolved, and the generator read
-            // symbol()->isGlobal() off a null pointer: 'm[1] : r' killed shc
-            // with SIGSEGV and no diagnostic, while 'A[0] : {1.,2.}' - the
-            // same replacement from a literal, and the example in the
-            // language document - was fine. Nothing was wrong with the
-            // generator, which has emitted shm_set_ref for an array element
-            // all along. It was never handed a typed expression to emit.
             const Type *value = typeOf(node.expr());
             if (!value) return;
             if (!value->isArray() || value->rank() != target->rank() ||
@@ -647,8 +589,6 @@ void Checker::visit(Assign &node) {
 
     const Symbol *existing = lookup(target.name());
 
-    // An array literal carries its own shape, which is what lets it create an
-    // array where an arbitrary expression cannot.
     ArrayLit *literal = dynamic_cast<ArrayLit *>(node.expr().get());
     const Type *value = nullptr;
     if (literal && existing && existing->type()->isArray()) {
@@ -667,8 +607,7 @@ void Checker::visit(Assign &node) {
     if (!value) return;
 
     if (!existing) {
-        // char[] is the exception, and deliberately so: a string carries its
-        // own length wherever it comes from, so there is nothing to infer.
+
         if (value->isArray() && !literal && !isText(value)) {
             diag_.error(unit_, line_, "Declare the array '" + target.name() + "' first");
             return;
@@ -692,19 +631,12 @@ void Checker::visit(CompoundAssign &node) {
     const Type *value = typeOf(node.expr());
     if (!target || !value) return;
 
-    // '+:' on a string appends, which is how one is built in a loop. '-:' has
-    // no meaning there, and neither has either operator on any other array.
     if (isText(target)) {
         if (!node.isAdd()) {
             diag_.error(unit_, line_, "'-:' does not apply to strings");
             return;
         }
-        // What is being appended has to be a string too. 10: "none of them
-        // mix a string with a number". The value's type was worked out four
-        // lines above and then never looked at, so s +: 5 reached the
-        // generator, which handed 5 to shm_text_concat as a pointer - a
-        // segfault where the app reports a check error. coerce says it in the
-        // app's own words, an array on either side never converting.
+
         coerce(node.expr(), target);
         return;
     }
@@ -721,8 +653,6 @@ void Checker::visit(MultiAssign &node) {
 
     Call &call = static_cast<Call &>(*node.call());
 
-    // A built-in has no prototype but still returns exactly one value, and
-    // '<s> : sqrt(16.)' still has to define 's'.
     std::vector<const Type *> outputs;
     if (call.builtin() >= 0) outputs.push_back(call.type());
     else if (call.prototype()) outputs = call.prototype()->outputs;
@@ -742,16 +672,7 @@ void Checker::visit(MultiAssign &node) {
             if (!inGlobalScope_) scope_.define(node.names()[i], created);
             target = created;
         } else if (target->type() != outputs[i]) {
-            // An existing target of another type. 5.2 makes the conversion
-            // automatic and silent at a declared destination, and an existing
-            // variable is one - the generator does it, having the output's
-            // kind and the target's both to hand.
-            //
-            // What it cannot do is turn an array into a number or the other
-            // way about, and letting that through is how this used to store a
-            // double's bits into an int slot and call it an answer. Refused
-            // here so that the generator may go on assuming the two are
-            // convertible.
+
             const bool convertible = !target->type()->isArray() && !outputs[i]->isArray();
             if (!convertible) {
                 diag_.error(unit_, line_, "'" + node.names()[i] + "' is " +
@@ -840,10 +761,6 @@ void Checker::visit(For &node) {
 void Checker::visit(Break &) {}
 void Checker::visit(Continue &) {}
 
-// Folds what the two loop-bound rules need and nothing more. Division is left
-// out deliberately: '/' means one thing between ints and another between
-// reals, and a folder that got that wrong would report a bound the program
-// never uses.
 bool Checker::constantNumber(const Expr &expr, double &value) const {
     if (expr.isIntLiteral())  { value = static_cast<const IntLit &>(expr).value();  return true; }
     if (expr.isRealLiteral()) { value = static_cast<const RealLit &>(expr).value(); return true; }
@@ -872,14 +789,6 @@ std::string Checker::number(double value) {
     return std::to_string(value);
 }
 
-// 'for i : 10 to 1 step 1' counts up from a start already past its end, so it
-// runs zero times. Nothing about that is illegal, so this is a warning.
-//
-// Only a loop whose three bounds all fold is judged. That is the case where
-// the direction is written into the source and nothing else could have been
-// meant; where a bound is computed, an empty pass may be exactly what that
-// run intends, and 'for j < v.col' over a vector - which expands to 0 to -2 -
-// is the language's own example of one.
 void Checker::warnIfLoopNeverRuns(For &node) {
     double start = 0.0;
     double end = 0.0;
@@ -895,4 +804,4 @@ void Checker::warnIfLoopNeverRuns(For &node) {
                              " moves away from " + number(end));
 }
 
-}  // namespace shalimar
+}

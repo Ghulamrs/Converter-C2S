@@ -13,9 +13,6 @@ namespace c2s {
 
 namespace {
 
-// A ceiling on how much one file's expansion may produce. Nothing legal
-// comes near it; it is here so that a case this expander has not thought of
-// ends as a diagnostic rather than as a converter that never returns.
 const std::size_t kTokenCeiling = 2000000;
 
 struct Ready {
@@ -36,8 +33,7 @@ public:
     }
 
 private:
-    // The span [begin, end) of 'in', with every macro in it substituted,
-    // appended to 'out'.
+
     bool expand(const std::vector<CToken> &in, std::size_t begin,
                 std::size_t end, std::set<std::string> &active,
                 std::vector<CToken> &out) {
@@ -68,9 +64,6 @@ private:
                 continue;
             }
 
-            // Function-like, and only a '(' makes it a call. A bare mention
-            // of the name is not one - C's rule, and it is what lets a macro
-            // share a name with something used as a plain identifier.
             if (i + 1 >= end || !in[i + 1].is("(")) {
                 if (!emit(token, out)) return false;
                 ++i;
@@ -82,9 +75,6 @@ private:
             if (!gather(in, i + 1, end, token, &args, &after)) return false;
             if (!checkArity(ready, args, token)) return false;
 
-            // Arguments are expanded before they are substituted, and with
-            // this macro still available to them - it is only disabled
-            // inside its own replacement.
             std::vector<std::vector<CToken> > expandedArgs;
             for (std::size_t k = 0; k < args.size(); ++k) {
                 std::vector<CToken> one;
@@ -97,8 +87,6 @@ private:
         return true;
     }
 
-    // The replacement, with parameters filled in, expanded again with this
-    // macro disabled, and appended to 'out'.
     bool substitute(const Ready &ready,
                     const std::vector<std::vector<CToken> > &args,
                     const CToken &use, std::set<std::string> &active,
@@ -117,8 +105,7 @@ private:
                 }
                 continue;
             }
-            // A replacement token was never written where it now stands, so
-            // it answers for the place the macro was used.
+
             CToken moved = token;
             moved.offset = use.offset;
             filled.push_back(moved);
@@ -130,7 +117,6 @@ private:
         return ok;
     }
 
-    // The argument list of a call, starting at the '(' in 'in[open]'.
     bool gather(const std::vector<CToken> &in, std::size_t open, std::size_t end,
                 const CToken &use, std::vector<std::vector<CToken> > *args,
                 std::size_t *after) {
@@ -141,12 +127,11 @@ private:
             const CToken &token = in[i];
             if (token.is("(")) {
                 ++depth;
-                if (depth == 1) continue;      // the opening one is not an argument
+                if (depth == 1) continue;
             } else if (token.is(")")) {
                 --depth;
                 if (depth == 0) {
-                    // '()' with nothing between it is one empty argument, or
-                    // none at all; checkArity settles which.
+
                     if (!current.empty() || !args->empty()) args->push_back(current);
                     *after = i + 1;
                     return true;
@@ -199,16 +184,13 @@ private:
     Diagnostics &diagnostics_;
 };
 
-}  // namespace
+}
 
 bool expandMacros(const std::vector<CPreScan::Macro> &macros,
                   std::vector<CToken> &tokens,
                   const Source &source, Diagnostics &diagnostics) {
     if (macros.empty()) return true;
 
-    // Each replacement is lexed once, here, rather than on every use. A
-    // replacement that will not lex is the author's to fix, and it is named
-    // at the #define rather than at some later place it was used.
     std::map<std::string, Ready> table;
     for (std::size_t i = 0; i < macros.size(); ++i) {
         const CPreScan::Macro &macro = macros[i];
@@ -227,9 +209,7 @@ bool expandMacros(const std::vector<CPreScan::Macro> &macros,
         for (std::size_t k = 0; k < macro.params.size(); ++k) {
             ready.paramIndex[macro.params[k]] = k;
         }
-        // A name defined twice: the last #define is what a C compiler would
-        // have been using by the end of the file, and a converter that
-        // silently used the first would differ from cc1 on the same text.
+
         table[macro.name] = ready;
     }
 
@@ -242,4 +222,4 @@ bool expandMacros(const std::vector<CPreScan::Macro> &macros,
     return true;
 }
 
-}  // namespace c2s
+}
