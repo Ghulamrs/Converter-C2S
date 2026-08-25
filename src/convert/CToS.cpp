@@ -1208,6 +1208,15 @@ bool CToS::counterEscapes(CFor &node, const std::string &name) const {
     // the second's init as an escape would cost the first its counting form
     // for nothing.
     if (currentFn_ == nullptr) return true;   // nothing to look at; be safe
+
+    // A counter that is not this function's own is out of this walk's
+    // reach. This scan reads one function body; a global can be read by any
+    // other function in the file, and there is no seeing them from here. So
+    // it is treated as read, which costs the counting form and keeps the
+    // answer right - a global counter left holding 0 where C left it 3 is a
+    // program that runs and disagrees.
+    if (isFileScope(name)) return true;
+
     NameScan loop(name);
     loop.run(node);
     NameScan whole(name);
@@ -1215,8 +1224,24 @@ bool CToS::counterEscapes(CFor &node, const std::string &name) const {
     const std::vector<std::size_t> &uses = whole.uses();
     for (std::size_t i = 0; i < uses.size(); ++i) {
         if (uses[i] > loop.reach()) return true;
+
+        // 'Before' is a statement about the source, not about the run. Where
+        // this for is itself inside a loop, everything before it comes round
+        // again after it - so on the second turn a read above the for is
+        // reading what the for left, which is the very thing the counting
+        // form does not leave. Source order alone said that was safe.
+        if (loopDepth_ > 0 && uses[i] < node.offset()) return true;
     }
     return false;
+}
+
+bool CToS::isFileScope(const std::string &name) const {
+    // Innermost outwards, stopping before the file's own scope: a nearer
+    // binding means the name is not the global one.
+    for (std::size_t i = scopes_.size(); i > 1; --i) {
+        if (scopes_[i - 1].count(name) != 0) return false;
+    }
+    return !scopes_.empty() && scopes_[0].count(name) != 0;
 }
 
 bool CToS::lowerCountingFor(CFor &node, std::string *escapedCounter) {

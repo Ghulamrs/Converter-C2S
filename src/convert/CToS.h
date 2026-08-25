@@ -166,6 +166,11 @@ private:
     // caller's diagnostic is a different sentence in each case.
     bool lowerCountingFor(CFor &node, std::string *escapedCounter);
     bool counterEscapes(CFor &node, const std::string &name) const;
+
+    // Is this name bound at file scope rather than inside the function
+    // being converted? scopes_[0] is the file's, so a name that resolves
+    // there and nowhere nearer belongs to the whole program.
+    bool isFileScope(const std::string &name) const;
     // One 'case' or 'default' of a switch, with the statements that follow
     // it up to the next label. Named here rather than inside lowerSwitch
     // because the falling lowering is a second function over the same list.
