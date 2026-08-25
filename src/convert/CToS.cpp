@@ -169,8 +169,9 @@ private:
 
 }  // namespace
 
-CToS::CToS(const Source &source, Diagnostics &diagnostics)
-    : source_(source) {
+CToS::CToS(const Source &source, Diagnostics &diagnostics,
+           const Permissions &permissions)
+    : source_(source), permissions_(permissions) {
     (void)diagnostics;
 }
 
@@ -206,20 +207,36 @@ void CToS::markBeyond(std::size_t offset, const std::string &reason) {
 }
 
 const shalimar::Type *CToS::scalarS(const CType &type, bool *lossy) const {
+    // Two different answers are wanted here, and the callers all spell the
+    // test 'scalar == nullptr || lossy'. A null return means Shalimar has no
+    // type of that shape at all - void, a struct, a pointer - and no
+    // permission moves it. 'lossy' means there is a type, and reaching it
+    // costs range or signedness: that is the one --allow-narrowing forgives.
+    //
+    // What forgiving it actually costs, said plainly because the flag's help
+    // line cannot: an 'unsigned' becomes an 'int', so a value above INT_MAX
+    // and C's defined wraparound both stop being representable - and
+    // Shalimar makes passing the int limit a runtime error rather than a
+    // wrapped value, so the program stops instead of quietly disagreeing.
+    // A 'long' the same, one word narrower. That is a real change of
+    // meaning, and it is why this is off unless asked for by name.
+    const bool forgive = permissions_.narrowing();
     *lossy = false;
     switch (type.kind()) {
         case CType::Kind::Int:
-            if (type.isUnsigned() || type.isLong() || type.isShort()) {
+            if (!forgive && (type.isUnsigned() || type.isLong() || type.isShort())) {
                 *lossy = true;
             }
             return shalimar::Type::intType();
         case CType::Kind::Double:
-            if (type.isLong()) *lossy = true;      // long double
+            if (!forgive && type.isLong()) *lossy = true;      // long double
             return shalimar::Type::realType();
         case CType::Kind::Float:
             return shalimar::Type::realType();     // widened, harmlessly
         case CType::Kind::Char:
-            if (type.isUnsigned() || type.isSignedExplicit()) *lossy = true;
+            if (!forgive && (type.isUnsigned() || type.isSignedExplicit())) {
+                *lossy = true;
+            }
             return shalimar::Type::charType();
         default:
             *lossy = true;
@@ -296,6 +313,13 @@ shalimar::ExprPtr CToS::intWrap(shalimar::ExprPtr value) {
 shalimar::ExprPtr CToS::expression(CExpr &node) {
     shalimar::ExprPtr saved = std::move(expr_);
     expr_.reset();
+    // Latch whether this position can take statements, and deny it to
+    // everything nested inside: a caller sets canLift_ for the expression it
+    // is about to convert, not for that expression's operands. A visitor
+    // that cares reads liftable_ on its first line, before any nested
+    // expression() call moves it on.
+    liftable_ = canLift_;
+    canLift_ = false;
     node.accept(*this);
     shalimar::ExprPtr result = std::move(expr_);
     expr_ = std::move(saved);
@@ -395,17 +419,136 @@ void CToS::visit(CUnary &node) {
     expr_.reset();
 }
 
+// Move whatever the last expression lifted into the block the statement is
+// being built in. Called before the statement itself is pushed, so the
+// rewrite's ifs stand ahead of the thing that reads their temporary.
+void CToS::flushLifted() {
+    for (std::size_t i = 0; i < lifted_.size(); ++i) {
+        block_->push_back(std::move(lifted_[i]));
+    }
+    lifted_.clear();
+}
+
+std::string CToS::mintLiftTemp(const shalimar::Type *type) {
+    char temp[24];
+    std::snprintf(temp, sizeof temp, "sc_%d", ++tempCount_);
+    const std::string name = rename(temp);
+    liftTemps_.push_back(std::make_pair(name, type));
+    return name;
+}
+
+// '&&' or '||' with an impure right side, rewritten as statements.
+//
+// Shalimar's '&' and '|' evaluate both sides before either is asked, so
+// 'i < n & a[i] = 0' indexes a[n] on the last turn - which is the whole
+// reason C's short circuit exists. The faithful form is a nest of ifs
+// writing a temporary, and ifs are statements:
+//
+//     a && b            sc_1 : 0
+//                       if <a> {
+//                         <whatever b needed>
+//                         if <b> { sc_1 : 1 }
+//                       }
+//
+//     a || b            sc_1 : 0
+//                       if <a> { sc_1 : 1 }
+//                       if sc_1 = 0 {
+//                         <whatever b needed>
+//                         if <b> { sc_1 : 1 }
+//                       }
+//
+// and the expression itself becomes 'sc_1'. Both shapes ask <a> exactly
+// once and <b> only on the turn C would have asked it.
+//
+// Returns false when there is nowhere to put those statements, leaving the
+// caller to refuse. That boundary is the ternary's, for the same reason and
+// deliberately: a rewrite that needs a statement works where a statement can
+// be expanded around it, and nowhere else.
+bool CToS::lowerShortCircuit(CBinary &node) {
+    const bool isAnd = node.op() == "&&";
+
+    // The left side is in a liftable position too, so 'a && b && c' - which
+    // parses as '(a && b) && c' - rewrites all the way down rather than
+    // refusing at the second one.
+    std::vector<shalimar::StmtPtr> outer;
+    outer.swap(lifted_);
+    canLift_ = true;
+    shalimar::ExprPtr lhs = expression(node.lhs());
+    std::vector<shalimar::StmtPtr> beforeUs;
+    beforeUs.swap(lifted_);
+    lifted_.swap(outer);
+    for (std::size_t i = 0; i < beforeUs.size(); ++i) {
+        lifted_.push_back(std::move(beforeUs[i]));
+    }
+
+    const std::string temp = mintLiftTemp(shalimar::Type::intType());
+    const int line = lineOf(node.offset());
+
+    lifted_.push_back(shalimar::StmtPtr(new shalimar::Assign(
+        shalimar::ExprPtr(new shalimar::Var(temp)), sInt(0), line)));
+
+    // The right side is converted into its own block, so that anything it
+    // lifts in turn is guarded by the same condition it is.
+    std::vector<shalimar::StmtPtr> around;
+    around.swap(lifted_);
+    canLift_ = true;
+    shalimar::ExprPtr rhs = expression(node.rhs());
+    shalimar::Block guarded;
+    guarded.swap(lifted_);
+    lifted_.swap(around);
+
+    shalimar::Block setTrue;
+    setTrue.push_back(shalimar::StmtPtr(new shalimar::Assign(
+        shalimar::ExprPtr(new shalimar::Var(temp)), sInt(1), line)));
+    std::unique_ptr<shalimar::If> takeRight(new shalimar::If(line));
+    takeRight->addBranch(std::move(rhs), std::move(setTrue));
+    guarded.push_back(shalimar::StmtPtr(takeRight.release()));
+
+    if (isAnd) {
+        std::unique_ptr<shalimar::If> gate(new shalimar::If(line));
+        gate->addBranch(std::move(lhs), std::move(guarded));
+        lifted_.push_back(shalimar::StmtPtr(gate.release()));
+    } else {
+        shalimar::Block setTrueLeft;
+        setTrueLeft.push_back(shalimar::StmtPtr(new shalimar::Assign(
+            shalimar::ExprPtr(new shalimar::Var(temp)), sInt(1), line)));
+        std::unique_ptr<shalimar::If> left(new shalimar::If(line));
+        left->addBranch(std::move(lhs), std::move(setTrueLeft));
+        lifted_.push_back(shalimar::StmtPtr(left.release()));
+
+        std::unique_ptr<shalimar::If> gate(new shalimar::If(line));
+        gate->addBranch(shalimar::ExprPtr(new shalimar::Binary(
+                            shalimar::Binary::Op::Equal,
+                            shalimar::ExprPtr(new shalimar::Var(temp)),
+                            sInt(0))),
+                        std::move(guarded));
+        lifted_.push_back(shalimar::StmtPtr(gate.release()));
+    }
+
+    expr_.reset(new shalimar::Var(temp));
+    return true;
+}
+
 void CToS::visit(CBinary &node) {
     using Op = shalimar::Binary::Op;
     const std::string &op = node.op();
+    const bool liftable = liftable_;
 
     if (op == "&&" || op == "||") {
         // Shalimar's '&' and '|' evaluate both sides. Safe only when the
         // right side cannot fault and does nothing observable.
         if (!isPure(node.rhs())) {
+            if (permissions_.shortCircuit() && liftable) {
+                lowerShortCircuit(node);
+                return;
+            }
             markBeyond(node.offset(),
                        std::string("'") + op + "' whose right side is not pure - "
-                       "Shalimar's form evaluates both sides");
+                       "Shalimar's form evaluates both sides" +
+                       (permissions_.shortCircuit()
+                            ? " - and here there is no statement to expand"
+                              " the rewrite into"
+                            : " - or pass --allow-short-circuit"));
             expr_.reset();
             return;
         }
@@ -650,6 +793,10 @@ void CToS::visit(CExprStmt &node) {
             }
 
             const int before = beyondCount_;
+            // The whole right side of a plain assignment is a place a
+            // rewrite can expand into: its statements go ahead of the
+            // assignment they compute a value for.
+            canLift_ = true;
             shalimar::ExprPtr value = expression(assign->value());
             // A char literal stored into a char lands as char(n).
             if (dynamic_cast<CCharLit *>(&assign->value()) != nullptr &&
@@ -659,7 +806,8 @@ void CToS::visit(CExprStmt &node) {
             shalimar::ExprPtr target = expression(assign->target());
             // A marker spoke for part of this statement; the placeholder
             // that kept the walk alive must not become a wrong assignment.
-            if (beyondCount_ != before) return;
+            if (beyondCount_ != before) { lifted_.clear(); return; }
+            flushLifted();
             block_->push_back(shalimar::StmtPtr(new shalimar::Assign(
                 std::move(target), std::move(value), lineOf(node.offset()))));
             return;
@@ -760,8 +908,17 @@ void CToS::visit(CIf &node) {
     std::unique_ptr<shalimar::If> branch(new shalimar::If(lineOf(node.offset())));
 
     CIf *walk = &node;
+    bool firstCondition = true;
     for (;;) {
+        // Only the first condition can take lifted statements. A chained
+        // 'else if' must not be evaluated until the ones above it have
+        // failed, and statements hoisted ahead of the whole If would run
+        // unconditionally - so those conditions are converted with no
+        // permission to lift, and refuse instead.
+        canLift_ = firstCondition;
         shalimar::ExprPtr cond = expression(walk->cond());
+        if (firstCondition) flushLifted();
+        firstCondition = false;
         shalimar::Block body;
         block(walk->thenArm(), &body);
         branch->addBranch(std::move(cond), std::move(body));
@@ -781,13 +938,53 @@ void CToS::visit(CIf &node) {
 }
 
 void CToS::visit(CWhile &node) {
+    canLift_ = true;
     shalimar::ExprPtr cond = expression(node.cond());
+
+    if (lifted_.empty()) {
+        shalimar::Block body;
+        ++loopDepth_;
+        block(node.body(), &body);
+        --loopDepth_;
+        block_->push_back(shalimar::StmtPtr(new shalimar::While(
+            std::move(cond), std::move(body), lineOf(node.offset()))));
+        return;
+    }
+
+    // The condition needed statements to compute, and a while asks its
+    // condition again on every turn - so the statements have to be inside
+    // the loop, which means the loop cannot be the one doing the testing:
+    //
+    //     while 1 {
+    //       <the rewrite's ifs>
+    //       if <cond> = 0 { break }
+    //       <body>
+    //     }
+    //
+    // 'continue' still does the right thing here, which is why this shape
+    // was chosen over hoisting the computation and repeating it at the end
+    // of the body: a continue jumps to the top, where the condition is
+    // recomputed and retested, exactly as C's while does.
+    const int line = lineOf(node.offset());
     shalimar::Block body;
+    for (std::size_t i = 0; i < lifted_.size(); ++i) {
+        body.push_back(std::move(lifted_[i]));
+    }
+    lifted_.clear();
+
+    shalimar::Block leave;
+    leave.push_back(shalimar::StmtPtr(new shalimar::Break(line)));
+    std::unique_ptr<shalimar::If> test(new shalimar::If(line));
+    test->addBranch(shalimar::ExprPtr(new shalimar::Binary(
+                        shalimar::Binary::Op::Equal, std::move(cond), sInt(0))),
+                    std::move(leave));
+    body.push_back(shalimar::StmtPtr(test.release()));
+
     ++loopDepth_;
     block(node.body(), &body);
     --loopDepth_;
     block_->push_back(shalimar::StmtPtr(new shalimar::While(
-        std::move(cond), std::move(body), lineOf(node.offset()))));
+        sInt(1), std::move(body), line)));
 }
 
 namespace {
@@ -1062,6 +1259,168 @@ void CToS::visit(CFor &node) {
         std::move(cond), std::move(body), lineOf(node.offset()))));
 }
 
+// The --allow-fall-through lowering.
+//
+// The if/elseif chain the ordinary lowering builds cannot say "and then the
+// next one too": every branch of a Shalimar 'if' is exclusive, which is
+// exactly right for a switch whose cases all break and exactly wrong for one
+// whose cases do not. So this drops the chain for the shape C actually has -
+// pick an arm to enter, then run arms from there until one ends.
+//
+// Two integers carry that. 'entry' is the index of the arm control enters at,
+// initialised past the last arm so that a selector matching nothing runs no
+// body. 'done' turns on when an arm that ended with 'break' or 'return' has
+// run, and stops the ones after it.
+//
+//     sw_1       : <selector>
+//     sw_1_entry : <arm count>
+//     if sw_1_entry = <count> & (sw_1 = 1 | sw_1 = 2) { sw_1_entry : 0 }
+//     if sw_1_entry = <count> & sw_1 = 3              { sw_1_entry : 1 }
+//     if sw_1_entry = <count> { sw_1_entry : <default index> }
+//     sw_1_done : 0
+//     if sw_1_entry <= 0 & sw_1_done = 0 { <arm 0> sw_1_done : 1 }
+//     if sw_1_entry <= 1 & sw_1_done = 0 { <arm 1> }
+//
+// The matching runs to completion before any body does, which is what makes
+// a 'default' sitting in the middle of the list behave: it is chosen only
+// when no case label matched, yet an arm above it can still fall into it,
+// because falling in is a question about 'entry <= i' and not about matching.
+//
+// Every test here is a comparison of integers, so Shalimar evaluating both
+// sides of '&' and '|' costs nothing - there is no call, no index and no
+// division anywhere in a condition this builds.
+void CToS::lowerFallingSwitchArms(CSwitch &node, const SwitchTemps &names,
+                                  std::vector<SwitchArm> &arms,
+                                  const std::vector<bool> &terminates) {
+    const int line = lineOf(node.offset());
+    // C's 'break' binds to the nearest enclosing switch OR loop, and here
+    // that is this switch - so for the length of these bodies, any loop
+    // outside is out of reach. Without this, a break inside an if inside a
+    // case, with the switch inside a loop, saw loopDepth_ still counting
+    // that loop and emitted a Shalimar 'break' - which left the LOOP. The
+    // program compiled, ran, and stopped iterating early; nothing was
+    // marked and c2s exited 0. A loop written inside an arm puts its own
+    // depth back on top, so a break belonging to that still converts.
+    const int outerLoopDepth = loopDepth_;
+    loopDepth_ = 0;
+
+    const int count = static_cast<int>(arms.size());
+
+    // 'no arm' is one past the last, so that the guard below is a single
+    // comparison rather than a range test.
+    block_->push_back(shalimar::StmtPtr(new shalimar::Assign(
+        shalimar::ExprPtr(new shalimar::Var(names.entry)), sInt(count), line)));
+
+    // The unmatched test, rebuilt for each arm - an expression tree is owned
+    // once and these cannot share one.
+    struct Unmatched {
+        const std::string &entry;
+        int count;
+        shalimar::ExprPtr operator()() const {
+            return shalimar::ExprPtr(new shalimar::Binary(
+                shalimar::Binary::Op::Equal,
+                shalimar::ExprPtr(new shalimar::Var(entry)), sInt(count)));
+        }
+    } unmatched = {names.entry, count};
+
+    std::size_t defaultIndex = arms.size();
+    for (std::size_t i = 0; i < arms.size(); ++i) {
+        SwitchArm &arm = arms[i];
+        if (arm.isDefault && arm.values.empty()) {
+            defaultIndex = i;
+            continue;
+        }
+
+        // selector = v1 | selector = v2 | ...
+        shalimar::ExprPtr match;
+        for (std::size_t v = 0; v < arm.values.size(); ++v) {
+            shalimar::ExprPtr test(new shalimar::Binary(
+                shalimar::Binary::Op::Equal,
+                shalimar::ExprPtr(new shalimar::Var(names.selector)),
+                std::move(arm.values[v])));
+            if (match == nullptr) match = std::move(test);
+            else match.reset(new shalimar::Binary(shalimar::Binary::Op::Or,
+                                                  std::move(match),
+                                                  std::move(test)));
+        }
+        // A 'default' grouped with case labels - 'case 1: default:' - is
+        // both: it matches its values, and it is where an unmatched
+        // selector goes.
+        if (arm.isDefault) defaultIndex = i;
+        if (match == nullptr) continue;
+
+        shalimar::Block set;
+        set.push_back(shalimar::StmtPtr(new shalimar::Assign(
+            shalimar::ExprPtr(new shalimar::Var(names.entry)),
+            sInt(static_cast<int>(i)), line)));
+        std::unique_ptr<shalimar::If> pick(new shalimar::If(line));
+        pick->addBranch(shalimar::ExprPtr(new shalimar::Binary(
+                            shalimar::Binary::Op::And, unmatched(),
+                            std::move(match))),
+                        std::move(set));
+        block_->push_back(shalimar::StmtPtr(pick.release()));
+    }
+
+    if (defaultIndex < arms.size()) {
+        shalimar::Block set;
+        set.push_back(shalimar::StmtPtr(new shalimar::Assign(
+            shalimar::ExprPtr(new shalimar::Var(names.entry)),
+            sInt(static_cast<int>(defaultIndex)), line)));
+        std::unique_ptr<shalimar::If> fallback(new shalimar::If(line));
+        fallback->addBranch(unmatched(), std::move(set));
+        block_->push_back(shalimar::StmtPtr(fallback.release()));
+    }
+
+    block_->push_back(shalimar::StmtPtr(new shalimar::Assign(
+        shalimar::ExprPtr(new shalimar::Var(names.done)), sInt(0), line)));
+
+    for (std::size_t i = 0; i < arms.size(); ++i) {
+        SwitchArm &arm = arms[i];
+
+        shalimar::Block armBody;
+        shalimar::Block *saved = block_;
+        block_ = &armBody;
+        for (std::size_t k = 0; k < arm.body.size(); ++k) {
+            // A 'break' anywhere but the tail was already dropped by the
+            // caller; one that is still here is inside an if, and it means
+            // "leave the switch from here" - which is a jump out of the
+            // middle of this arm's body, and there is nothing to jump to.
+            if (dynamic_cast<CBreak *>(arm.body[k]) != nullptr) {
+                markBeyond(arm.body[k]->offset(),
+                           "a break inside the case but not at its end");
+                continue;
+            }
+            statement(*arm.body[k]);
+        }
+        // Only an arm that ends itself needs to say so, and only while
+        // there is a later arm that would otherwise run.
+        if (terminates[i] && i + 1 < arms.size()) {
+            armBody.push_back(shalimar::StmtPtr(new shalimar::Assign(
+                shalimar::ExprPtr(new shalimar::Var(names.done)), sInt(1),
+                line)));
+        }
+        block_ = saved;
+
+        if (armBody.empty()) continue;
+
+        shalimar::ExprPtr reached(new shalimar::Binary(
+            shalimar::Binary::Op::LessEqual,
+            shalimar::ExprPtr(new shalimar::Var(names.entry)),
+            sInt(static_cast<int>(i))));
+        shalimar::ExprPtr running(new shalimar::Binary(
+            shalimar::Binary::Op::Equal,
+            shalimar::ExprPtr(new shalimar::Var(names.done)), sInt(0)));
+        std::unique_ptr<shalimar::If> guard(new shalimar::If(line));
+        guard->addBranch(shalimar::ExprPtr(new shalimar::Binary(
+                             shalimar::Binary::Op::And, std::move(reached),
+                             std::move(running))),
+                         std::move(armBody));
+        block_->push_back(shalimar::StmtPtr(guard.release()));
+    }
+
+    loopDepth_ = outerLoopDepth;
+}
+
 void CToS::lowerSwitch(CSwitch &node) {
     // The selector is saved once - C evaluates it once - into a temporary
     // the hoist walk declared at the top of the function, then the cases
@@ -1076,13 +1435,14 @@ void CToS::lowerSwitch(CSwitch &node) {
 
     // The selector's name and its Declare came from the hoist walk; only
     // the assignment belongs here, where the switch stands.
-    std::map<std::size_t, std::string>::const_iterator minted =
+    std::map<std::size_t, SwitchTemps>::const_iterator minted =
         switchTemps_.find(node.offset());
     if (minted == switchTemps_.end()) {
         markBeyond(node.offset(), "a switch the hoist walk never reached");
         return;
     }
-    const std::string selector = minted->second;
+    const SwitchTemps names = minted->second;
+    const std::string selector = names.selector;
 
     block_->push_back(shalimar::StmtPtr(new shalimar::Assign(
         shalimar::ExprPtr(new shalimar::Var(selector)), expression(node.cond()),
@@ -1091,19 +1451,13 @@ void CToS::lowerSwitch(CSwitch &node) {
     // Walk the case list. Each entry in the C tree is a CCase owning its
     // labelled statement; the rest of a case's body is the following
     // statements up to the next CCase.
-    struct Arm {
-        std::vector<shalimar::ExprPtr> values;   // empty for default
-        bool isDefault = false;
-        std::vector<CStmt *> body;
-        std::size_t offset = 0;
-    };
-    std::vector<Arm> arms;
+    std::vector<SwitchArm> arms;
 
     std::vector<CStmtPtr> &items = body->body();
     for (std::size_t i = 0; i < items.size(); ++i) {
         CStmt *item = items[i].get();
         while (CCase *label = dynamic_cast<CCase *>(item)) {
-            Arm arm;
+            SwitchArm arm;
             arm.offset = label->offset();
             if (label->isDefault()) {
                 arm.isDefault = true;
@@ -1132,32 +1486,58 @@ void CToS::lowerSwitch(CSwitch &node) {
         arms.back().body.push_back(item);
     }
 
-    // Convert each arm; the trailing break drops, an absent one that is not
-    // the last arm is fall-through, and a break elsewhere is C's escape
-    // from the switch, which the chain has no need of - but only when it is
-    // the tail. Deeper breaks are markers.
+    // Which arms end themselves, and therefore whether any of them runs on
+    // into the next. Both answers are wanted before a single body is
+    // converted, because between them they choose which of two whole
+    // lowerings this switch gets - and the bodies can only be walked once.
+    std::vector<bool> terminates(arms.size(), false);
+    bool anyFallsThrough = false;
+    for (std::size_t i = 0; i < arms.size(); ++i) {
+        SwitchArm &arm = arms[i];
+        if (!arm.body.empty() &&
+            dynamic_cast<CBreak *>(arm.body.back()) != nullptr) {
+            terminates[i] = true;
+            arm.body.pop_back();
+        }
+        if (!arm.body.empty() &&
+            dynamic_cast<CReturn *>(arm.body.back()) != nullptr) {
+            terminates[i] = true;    // a return ends the case as surely
+        }
+        if (!terminates[i] && i + 1 < arms.size()) anyFallsThrough = true;
+    }
+
+    if (anyFallsThrough && permissions_.fallThrough()) {
+        lowerFallingSwitchArms(node, names, arms, terminates);
+        return;
+    }
+
+    // Convert each arm; the trailing break has already been dropped, an
+    // absent one that is not the last arm is fall-through, and a break
+    // elsewhere is C's escape from the switch, which the chain has no need
+    // of - but only when it is the tail. Deeper breaks are markers.
     std::unique_ptr<shalimar::If> chain(new shalimar::If(lineOf(node.offset())));
     shalimar::Block defaultBody;
     bool haveDefault = false;
     bool haveBranch = false;
 
-    for (std::size_t i = 0; i < arms.size(); ++i) {
-        Arm &arm = arms[i];
+    // C's 'break' binds to the nearest enclosing switch OR loop, and here
+    // that is this switch - so for the length of these bodies, any loop
+    // outside is out of reach. Without this, a break inside an if inside a
+    // case, with the switch inside a loop, saw loopDepth_ still counting
+    // that loop and emitted a Shalimar 'break' - which left the LOOP. The
+    // program compiled, ran, and stopped iterating early; nothing was
+    // marked and c2s exited 0. A loop written inside an arm puts its own
+    // depth back on top, so a break belonging to that still converts.
+    const int outerLoopDepth = loopDepth_;
+    loopDepth_ = 0;
 
-        bool endsWithBreak = false;
-        if (!arm.body.empty() &&
-            dynamic_cast<CBreak *>(arm.body.back()) != nullptr) {
-            endsWithBreak = true;
-            arm.body.pop_back();
-        }
-        if (!arm.body.empty() &&
-            dynamic_cast<CReturn *>(arm.body.back()) != nullptr) {
-            endsWithBreak = true;    // a return ends the case as surely
-        }
-        if (!endsWithBreak && i + 1 < arms.size()) {
+    for (std::size_t i = 0; i < arms.size(); ++i) {
+        SwitchArm &arm = arms[i];
+
+        if (!terminates[i] && i + 1 < arms.size()) {
             markBeyond(arm.offset,
                        "a case that falls through into the next - materialise "
-                       "it by hand");
+                       "it by hand, or pass --allow-fall-through");
             continue;
         }
 
@@ -1194,6 +1574,8 @@ void CToS::lowerSwitch(CSwitch &node) {
         chain->addBranch(std::move(cond), std::move(armBody));
         haveBranch = true;
     }
+
+    loopDepth_ = outerLoopDepth;
 
     if (haveDefault) chain->setElse(std::move(defaultBody));
     if (haveBranch) {
@@ -1297,7 +1679,10 @@ void CToS::visit(CReturn &node) {
                            "main returning a status - Shalimar has none");
             }
         } else {
-            ret->add(expression(*node.value()));
+            canLift_ = true;
+            shalimar::ExprPtr value = expression(*node.value());
+            flushLifted();
+            ret->add(std::move(value));
         }
     }
     if (beyondCount_ != before) {
@@ -1373,6 +1758,23 @@ void CToS::lowerPrintf(CCall &call) {
 
     const std::string &text = format->text();
     std::size_t nextArg = 1;
+
+    // C evaluates every argument of a printf before any of it is written.
+    // Shalimar's '?' evaluates and writes one item at a time, so an argument
+    // that itself prints interleaves with the line it is an argument to -
+    // 'high 3 reach 3' rather than 'reach 3' and then 'high 3 1'. The same
+    // values in a different order, with nothing to say it happened.
+    //
+    // So an impure argument is evaluated into a temporary first and the '?'
+    // is handed the temporary, which restores C's order exactly: everything
+    // observable happens before the first item is written. The prints are
+    // built into a block of their own meanwhile, because the hoists must
+    // stand ahead of all of them and a multi-line format pushes its first
+    // '?' long before the last argument has been seen.
+    shalimar::Block prelude;
+    shalimar::Block prints;
+    shalimar::Block *outerBlock = block_;
+    block_ = &prints;
     std::unique_ptr<shalimar::Print> print(new shalimar::Print(false, line));
     bool printHasItems = false;
     std::string pending;
@@ -1410,6 +1812,7 @@ void CToS::lowerPrintf(CCall &call) {
             if (static_cast<unsigned char>(c) < 32 || c == '"') {
                 markBeyond(call.offset(),
                            "a format character Shalimar cannot spell");
+                block_ = outerBlock;
                 return;
             }
             // The mirror of the strip before a hole: a space directly after
@@ -1422,6 +1825,22 @@ void CToS::lowerPrintf(CCall &call) {
         ++i;
         if (i >= text.size()) {
             markBeyond(call.offset(), "a format ending in '%'");
+            block_ = outerBlock;
+            return;
+        }
+        // A length modifier names a width Shalimar has not got. Under
+        // --allow-narrowing the argument it describes has already become a
+        // plain int or real, so the modifier now describes a type that is
+        // not there and dropping it is what keeps the hole and the argument
+        // agreeing. Without the permission this never runs: the declaration
+        // that made the value 'long' was refused well before the printf.
+        while (permissions_.narrowing() && i < text.size() &&
+               (text[i] == 'l' || text[i] == 'h' || text[i] == 'L')) {
+            ++i;
+        }
+        if (i >= text.size()) {
+            markBeyond(call.offset(), "a format ending in '%'");
+            block_ = outerBlock;
             return;
         }
         const char spec = text[i];
@@ -1431,6 +1850,7 @@ void CToS::lowerPrintf(CCall &call) {
         }
         if (nextArg >= args.size()) {
             markBeyond(call.offset(), "more format holes than arguments");
+            block_ = outerBlock;
             return;
         }
         // '?' writes a space after every item, so the single space printf
@@ -1441,6 +1861,23 @@ void CToS::lowerPrintf(CCall &call) {
         }
         flush(print, pending, printHasItems);
         shalimar::ExprPtr item = expression(*args[nextArg]);
+
+        // A temporary is minted at the type of the item as it will be
+        // written, which is what the format says - so the hoist itself
+        // waits until the wraps below have had their say.
+        const shalimar::Type *hoistType = nullptr;
+        if (!isPure(*args[nextArg])) {
+            if (spec == 'f' || spec == 'g' || spec == 'e') {
+                hoistType = shalimar::Type::realType();
+            } else if (spec == 'c') {
+                hoistType = shalimar::Type::charType();
+            } else if (spec == 'd' || spec == 'i' || spec == 'u') {
+                hoistType = shalimar::Type::intType();
+            }
+            // '%s' is left alone: its argument is a char array, and there
+            // is no scalar temporary to put one of those in.
+        }
+
         if (spec == 'f') {
             // printf's %f writes six decimals; Shalimar's default is seven.
             // prec(6) closes the gap, and stays set - every later real in a
@@ -1448,7 +1885,13 @@ void CToS::lowerPrintf(CCall &call) {
             print->add(shalimar::ExprPtr(new shalimar::Precision(sInt(6))));
             print->add(std::move(item));
         } else if (spec == 'd' || spec == 'i' || spec == 'g' ||
-                   spec == 'e' || spec == 's') {
+                   spec == 'e' || spec == 's' ||
+                   (spec == 'u' && permissions_.narrowing())) {
+            // '%u' only under the permission, and for the same reason as the
+            // modifiers above: once unsigned has been narrowed to int there
+            // is nothing unsigned left to print. '%x' and '%o' stay refused
+            // either way - those are a radix, not a width, and '?' writes
+            // decimal.
             // '%d' of a char prints its code in C, and '?' of a char prints
             // the character. Same promotion as the arithmetic one above.
             if ((spec == 'd' || spec == 'i') && isCharContext(*args[nextArg])) {
@@ -1461,8 +1904,22 @@ void CToS::lowerPrintf(CCall &call) {
             markBeyond(call.offset(),
                        std::string("the '%") + spec + "' format - only plain "
                        "%d %i %f %g %e %s %c carry");
+            block_ = outerBlock;
             return;
         }
+        if (hoistType != nullptr) {
+            // The item has just gone into the print; take it back out, put
+            // it in a temporary evaluated ahead of everything, and hand the
+            // print the temporary instead.
+            std::vector<shalimar::ExprPtr> &written = print->items();
+            shalimar::ExprPtr value = std::move(written.back());
+            const std::string temp = mintLiftTemp(hoistType);
+            prelude.push_back(shalimar::StmtPtr(new shalimar::Assign(
+                shalimar::ExprPtr(new shalimar::Var(temp)), std::move(value),
+                line)));
+            written.back().reset(new shalimar::Var(temp));
+        }
+
         ++nextArg;
         printHasItems = true;
     }
@@ -1471,6 +1928,14 @@ void CToS::lowerPrintf(CCall &call) {
     if (printHasItems) {
         // No trailing newline: '??'.
         block_->push_back(shalimar::StmtPtr(print.release()));
+    }
+
+    block_ = outerBlock;
+    for (std::size_t i = 0; i < prelude.size(); ++i) {
+        block_->push_back(std::move(prelude[i]));
+    }
+    for (std::size_t i = 0; i < prints.size(); ++i) {
+        block_->push_back(std::move(prints[i]));
     }
 }
 
@@ -1682,11 +2147,24 @@ void CToS::hoistDeclarations(CStmt &node, shalimar::Block *top) {
         // declared it inside the loop, and shc refused the file.
         char temp[24];
         std::snprintf(temp, sizeof temp, "sw_%d", ++tempCount_);
-        const std::string selector = rename(temp);
-        switchTemps_[sw->offset()] = selector;
+        SwitchTemps names;
+        names.selector = rename(temp);
         top->push_back(shalimar::StmtPtr(new shalimar::Declare(
-            shalimar::Type::intType(), selector, nullptr,
+            shalimar::Type::intType(), names.selector, nullptr,
             lineOf(sw->offset()))));
+        if (permissions_.fallThrough()) {
+            std::snprintf(temp, sizeof temp, "sw_%d_entry", tempCount_);
+            names.entry = rename(temp);
+            std::snprintf(temp, sizeof temp, "sw_%d_done", tempCount_);
+            names.done = rename(temp);
+            top->push_back(shalimar::StmtPtr(new shalimar::Declare(
+                shalimar::Type::intType(), names.entry, nullptr,
+                lineOf(sw->offset()))));
+            top->push_back(shalimar::StmtPtr(new shalimar::Declare(
+                shalimar::Type::intType(), names.done, nullptr,
+                lineOf(sw->offset()))));
+        }
+        switchTemps_[sw->offset()] = names;
         hoistDeclarations(sw->body(), top);
         return;
     }
@@ -1786,12 +2264,26 @@ void CToS::convertFunction(CFunctionDef &fn) {
     }
 
     shalimar::Block body;
+    liftTemps_.clear();
+    lifted_.clear();
     if (signatureOk) {
         shalimar::Block *saved = block_;
         block_ = &body;
         hoistDeclarations(fn.body(), &body);
         block_ = saved;
         block(fn.body(), &body);
+
+        // The short-circuit temporaries, unlike every other local, are only
+        // discovered by walking expressions - so they cannot be minted by
+        // the hoist walk that runs before it. They are collected during the
+        // walk instead and declared here, at the top, which is where
+        // Shalimar wants every Declare and where the hoist put the rest.
+        for (std::size_t i = liftTemps_.size(); i > 0; --i) {
+            body.insert(body.begin(),
+                        shalimar::StmtPtr(new shalimar::Declare(
+                            liftTemps_[i - 1].second, liftTemps_[i - 1].first,
+                            nullptr, lineOf(fn.offset()))));
+        }
     } else {
         // The signature already spoke; the body would only cascade.
     }

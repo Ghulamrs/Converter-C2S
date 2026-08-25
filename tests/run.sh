@@ -9,11 +9,26 @@
 #   tests/cases/s2c/*.shm    Shalimar -> C89, byte-identical output
 #   tests/cases/c2s/*.c      C89 -> Shalimar, identical after stripping the
 #                            trailing space Shalimar's '?' always writes
+#   tests/cases/allow/*.c    the same, but converted under the permission in
+#                            the case's .flags file - the rewrites that are
+#                            refused by default because each one compiles
+#                            without meaning quite what the C did. Proving
+#                            these needs a differential run and nothing less:
+#                            a short-circuit rewrite that got the guard wrong
+#                            still compiles, and only running it says so.
 #   tests/cases/beyond/*.c   valid C89 that cc1 accepts, refused with
 #                            markers and exit 1; every refusal counted
 #                            must also be one shown, and any patterns in
 #                            the case's .expect file must be among them
 #   tests/cases/defines/*.c  must stop with the preprocessor decision list
+#   the command line          exit statuses and codes, which no case above
+#                            reaches - every one of them hands c2s a good
+#                            file and a good option
+#
+# A case in any directory may carry a <name>.flags file. Its contents are
+# passed to c2s and to nothing else. In beyond/ that is how a refusal is
+# pinned as a refusal THE PERMISSION DOES NOT LIFT, which is a different
+# statement from one that has never been asked about.
 
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -26,6 +41,12 @@ mkdir -p "$out"
 pass=0; fail=0
 
 fails() { echo "FAIL: $1"; fail=$((fail+1)); }
+
+# The flags a case is converted under, or nothing. Read as words rather than
+# quoted, so a .flags file holding two options works.
+flagsfor() {
+    if [ -f "$1" ]; then cat "$1"; fi
+}
 
 if [ ! -x "$CC1" ]; then echo "no cc1 oracle at $CC1 - set CC1="; exit 2; fi
 if [ ! -x "$SHC" ]; then echo "no shc oracle at $SHC - set SHC="; exit 2; fi
@@ -51,6 +72,38 @@ for f in "$here"/cases/c2s/*.c; do
     if cmp -s "$out/o1s" "$out/o2"; then pass=$((pass+1)); else fails "$n: outputs differ"; fi
 done
 
+# The permission cases. Same differential shape as c2s above - the only
+# difference is the flags, and the fact that without them every one of these
+# would be refused rather than wrong.
+for f in "$here"/cases/allow/*.c; do
+    [ -e "$f" ] || continue
+    n=$(basename "$f" .c)
+    flags=$(flagsfor "$here/cases/allow/$n.flags")
+
+    # First: it must still be refused WITHOUT the permission. A case that
+    # converts either way is not testing a permission, and would go on
+    # passing if the flag stopped being read - which is the exact fault
+    # this whole section exists because of.
+    if "$c2s" "$f" -o "$out/bare_$n.shm" 2>"$out/e"; then
+        fails "$n: converts without $flags, so it proves nothing about it"
+        continue
+    fi
+
+    "$CC1" "$f" -o "$out/c_$n" 2>"$out/e" || { fails "$n: cc1 refused the original"; continue; }
+    # shellcheck disable=SC2086
+    "$c2s" "$f" -o "$out/conv_$n.shm" $flags 2>"$out/e" ||
+        { fails "$n: markers or refusal under $flags: $(head -1 "$out/e")"; continue; }
+    "$SHC" "$out/conv_$n.shm" -o "$out/s_$n" 2>"$out/e" ||
+        { fails "$n: shc refused the conversion: $(head -2 "$out/e")"; continue; }
+    "$out/c_$n" > "$out/o1" 2>&1
+    "$out/s_$n" 2>&1 | sed 's/ *$//' > "$out/o2"
+    sed 's/ *$//' "$out/o1" > "$out/o1s"
+    if cmp -s "$out/o1s" "$out/o2"; then pass=$((pass+1)); else
+        fails "$n: outputs differ under $flags"
+        diff "$out/o1s" "$out/o2" | head -6 | sed 's/^/    /'
+    fi
+done
+
 for f in "$here"/cases/beyond/*.c; do
     n=$(basename "$f" .c)
 
@@ -60,7 +113,9 @@ for f in "$here"/cases/beyond/*.c; do
     "$CC1" -c "$f" -o "$out/b_$n.o" 2>"$out/e" ||
         { fails "$n: cc1 refused the case itself: $(head -2 "$out/e")"; continue; }
 
-    "$c2s" "$f" -o "$out/conv_$n.shm" 2>"$out/e"
+    flags=$(flagsfor "$here/cases/beyond/$n.flags")
+    # shellcheck disable=SC2086
+    "$c2s" "$f" -o "$out/conv_$n.shm" $flags 2>"$out/e"
     rc=$?
     if [ $rc -ne 1 ]; then fails "$n: expected exit 1 with markers, got $rc"; continue; fi
     if ! grep -q 'BEYOND SHALIMAR' "$out/conv_$n.shm"; then fails "$n: no markers in the output"; continue; fi

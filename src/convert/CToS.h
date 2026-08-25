@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "../Options.h"
 #include "../c/CAst.h"
 #include "../s/vendor/Ast.h"
 
@@ -60,7 +61,8 @@ class Diagnostics;
 // preprocessor-born is a marker naming what it was.
 class CToS : public CVisitor {
 public:
-    CToS(const Source &source, Diagnostics &diagnostics);
+    CToS(const Source &source, Diagnostics &diagnostics,
+         const Permissions &permissions = Permissions());
 
     std::unique_ptr<shalimar::Program> convert(CProgram &program);
 
@@ -125,6 +127,26 @@ private:
     const Info *lookup(const std::string &name) const;
     void declareLocal(CDeclaration &decl, bool atTop);
     bool isPure(CExpr &node) const;
+
+    // --allow-short-circuit. Shalimar's '&' and '|' ask both sides before
+    // either is answered, so an impure right side - an index, a call, a
+    // division - cannot simply become one of them. The rewrite is a
+    // temporary and a nest of ifs, which are statements, so it only works
+    // where there is somewhere to put statements. 'canLift_' is how a
+    // statement visitor says "here is such a place" to the expression it is
+    // about to convert; 'liftable_' is that answer as the visitor reads it,
+    // latched by expression() before any nested call can overwrite it.
+    // Anything the rewrite emits goes in 'lifted_', to be flushed ahead of
+    // the statement being built.
+    void flushLifted();
+    std::string mintLiftTemp(const shalimar::Type *type);
+    bool lowerShortCircuit(CBinary &node);
+    bool canLift_ = false;
+    bool liftable_ = false;
+    std::vector<shalimar::StmtPtr> lifted_;
+    // This function's lifted temporaries, with the type each was minted
+    // at, declared at the top of the function once its walk is done.
+    std::vector<std::pair<std::string, const shalimar::Type *> > liftTemps_;
     bool isCharContext(CExpr &other) const;
     shalimar::ExprPtr charWrap(shalimar::ExprPtr value);
     shalimar::ExprPtr intWrap(shalimar::ExprPtr value);
@@ -136,7 +158,36 @@ private:
     // caller's diagnostic is a different sentence in each case.
     bool lowerCountingFor(CFor &node, std::string *escapedCounter);
     bool counterEscapes(CFor &node, const std::string &name) const;
+    // One 'case' or 'default' of a switch, with the statements that follow
+    // it up to the next label. Named here rather than inside lowerSwitch
+    // because the falling lowering is a second function over the same list.
+    // The names one switch needs at the top of the function. 'selector'
+    // always - the value being tested, saved once so the chain can test it
+    // repeatedly. 'entry' and 'done' only under --allow-fall-through, which
+    // trades the if/elseif chain for a pair of flags that can express a case
+    // running on into the next; they are minted here regardless of whether
+    // this particular switch turns out to need them, because the hoist walk
+    // reaches the top of the function and the statement walk does not.
+    struct SwitchTemps {
+        std::string selector;
+        std::string entry;
+        std::string done;
+    };
+
+    struct SwitchArm {
+        std::vector<shalimar::ExprPtr> values;   // empty for default
+        bool isDefault = false;
+        std::vector<CStmt *> body;
+        std::size_t offset = 0;
+    };
     void lowerSwitch(CSwitch &node);
+
+    // The --allow-fall-through lowering, used only when some arm really does
+    // run on into the next. It gives up the if/elseif chain - which cannot
+    // say 'and then the one after' - for an entry index and a done flag.
+    void lowerFallingSwitchArms(CSwitch &node, const SwitchTemps &names,
+                                std::vector<SwitchArm> &arms,
+                                const std::vector<bool> &terminates);
     bool lowerTernaryReturn(CTernary &top, std::size_t offset,
                             shalimar::Block *into);
     bool returnArm(CExpr &value, std::size_t offset, shalimar::Block *into);
@@ -152,6 +203,11 @@ private:
     // report through. The constructor still takes one for the day that
     // changes, and for the symmetry of the two directions.
     const Source &source_;
+
+    // The rewrites the command line allowed. Each one of these compiles
+    // without meaning quite what the C did, which is why none is the
+    // default and why each is asked for by name - see Options.h.
+    Permissions permissions_;
 
     std::unique_ptr<shalimar::Program> program_;
     shalimar::Block *block_ = nullptr;
@@ -181,7 +237,8 @@ private:
     // declaration stands - which is where C says the name becomes visible,
     // and where block() will pop it again.
     std::map<std::size_t, Info> hoisted_;
-    std::map<std::size_t, std::string> switchTemps_;
+
+    std::map<std::size_t, SwitchTemps> switchTemps_;
     std::set<std::string> usedNames_;      // every Shalimar name handed out
     std::set<std::string> knownFunctions_; // defined in this file
     int beyondCount_ = 0;

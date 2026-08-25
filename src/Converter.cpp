@@ -18,8 +18,6 @@ Converter::Result Converter::convert(const std::string &sourceText,
                                      Direction direction,
                                      const Permissions &permissions,
                                      bool emitIncludes) {
-    (void)permissions;   // carried for the rewrite flags as they grow
-
     Result result;
     Diagnostics diagnostics;
     Source source(name, sourceText);
@@ -60,7 +58,7 @@ Converter::Result Converter::convert(const std::string &sourceText,
             return result;
         }
 
-        CToS converter(source, diagnostics);
+        CToS converter(source, diagnostics, permissions);
         std::unique_ptr<shalimar::Program> converted = converter.convert(*program);
 
         SPrinter printer;
