@@ -612,6 +612,26 @@ void Checker::visit(Assign &node) {
         if (target->isArray()) {
             if (ArrayLit *literal = dynamic_cast<ArrayLit *>(node.expr().get())) {
                 coerceLiteral(*literal, target);
+                return;
+            }
+
+            // Not a literal, so the right side is an ordinary expression and
+            // has to be typed like one. Returning here without doing that
+            // left every Var in it unresolved, and the generator read
+            // symbol()->isGlobal() off a null pointer: 'm[1] : r' killed shc
+            // with SIGSEGV and no diagnostic, while 'A[0] : {1.,2.}' - the
+            // same replacement from a literal, and the example in the
+            // language document - was fine. Nothing was wrong with the
+            // generator, which has emitted shm_set_ref for an array element
+            // all along. It was never handed a typed expression to emit.
+            const Type *value = typeOf(node.expr());
+            if (!value) return;
+            if (!value->isArray() || value->rank() != target->rank() ||
+                value->scalar() != target->scalar()) {
+                diag_.error(unit_, line_,
+                            "Cannot use " + value->spelling() + " where " +
+                                target->spelling() + " is required");
+                return;
             }
             return;
         }
