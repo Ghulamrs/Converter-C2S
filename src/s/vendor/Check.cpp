@@ -107,19 +107,10 @@ bool Checker::check(Program &program) {
                 continue;
             }
         }
-        if (findBuiltin(f->proto().name) >= 0) {
-            diag_.error(f->proto().unit, f->proto().line, "'" + f->proto().name + "' is a built-in name");
-            f->reject();
-            continue;
-        }
-
         if (f->proto().name == "prec") {
             diag_.error(f->proto().unit, f->proto().line, "'prec' is reserved for '? prec(n)'");
             f->reject();
             continue;
-        }
-        for (const Param &parameter : f->proto().inputs) {
-            refuseConstant(parameter.name, "a parameter name");
         }
     }
 
@@ -242,9 +233,19 @@ const Type *Checker::common(const Type *a, const Type *b) const {
 }
 
 bool Checker::refuseConstant(const std::string &name, const char *what) {
-    (void)what;
+    // A program may have its own pi or e, but it has to say so. Declared -
+    // 'real pi', or a parameter - the name is the program's for that whole
+    // body and the constant is simply not in it. Created by assignment it is
+    // refused, because Shalimar makes a name on first write: 'pi : 3' would
+    // leave '? pi' meaning 3.14159 above the line and 3 below it, one name
+    // with two meanings in one function. That is the hazard
+    // SHALIMAR_LANGUAGE.md named when it made these read-only, and it is the
+    // half worth keeping.
     if (!isConstant(name)) return false;
-    diag_.error(unit_, line_, "'" + name + "' is a constant");
+    if (lookup(name) != nullptr) return false;
+    (void)what;
+    diag_.error(unit_, line_, "'" + name + "' is a constant - declare it first "
+                              "if you want your own");
     return true;
 }
 
@@ -294,13 +295,13 @@ void Checker::visit(ArrayLit &node) {
 }
 
 void Checker::visit(Var &node) {
-    if (isConstant(node.name())) {
-        node.resolveConstant(constantValue(node.name()));
-        node.setType(Type::realType());
-        return;
-    }
     const Symbol *symbol = lookup(node.name());
     if (!symbol) {
+        if (isConstant(node.name())) {
+            node.resolveConstant(constantValue(node.name()));
+            node.setType(Type::realType());
+            return;
+        }
         reportUndefined(node.name());
         return;
     }
@@ -415,7 +416,12 @@ void Checker::visit(Binary &node) {
 }
 
 void Checker::visit(Call &node) {
-    const int which = findBuiltin(node.callee());
+    // The program's own function wins. A builtin is what the name means when
+    // nothing in the file has claimed it, which is the rule C gets from
+    // headers - sin is <math.h>'s until you declare your own - said here
+    // without needing headers to say it.
+    Function *user = program_->find(node.callee());
+    const int which = user != nullptr ? -1 : findBuiltin(node.callee());
     if (which >= 0) {
         const Builtin &fn = builtin(which);
         node.resolveBuiltin(which);
@@ -446,7 +452,7 @@ void Checker::visit(Call &node) {
         return;
     }
 
-    Function *callee = program_->find(node.callee());
+    Function *callee = user;
     if (!callee) {
         diag_.error(unit_, line_, "Unknown function '" + node.callee() + "'");
         for (ExprPtr &argument : node.arguments()) typeOf(argument);
@@ -497,7 +503,6 @@ void Checker::visit(Call &node) {
 }
 
 void Checker::visit(Declare &node) {
-    if (refuseConstant(node.name(), "declared")) return;
     if (scope_.definedHere(node.name()) || (inGlobalScope_ && globals_.count(node.name()))) {
         diag_.error(unit_, line_, "Variable '" + node.name() + "' already defined");
         return;

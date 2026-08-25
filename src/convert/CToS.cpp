@@ -15,10 +15,7 @@ namespace {
 bool isShalimarReserved(const std::string &name) {
     static const char *const words[] = {
         "if", "elseif", "else", "while", "for", "to", "step", "fun", "return",
-        "break", "continue", "int", "real", "char", "prec", "pi", "e",
-        "abs", "sqrt", "log", "exp", "hypot", "sin", "cos", "tan", "asin",
-        "acos", "atan", "atan2", "pow", "round", "ceil", "floor", "trunc",
-        "max", "min", "len"
+        "break", "continue", "int", "real", "char", "prec"
     };
     std::string lower;
     for (std::size_t i = 0; i < name.size(); ++i) {
