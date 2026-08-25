@@ -351,6 +351,29 @@ bool CToS::isCharValued(CExpr &node) const {
     return false;
 }
 
+bool CToS::isArrayValued(CExpr &node) const {
+    if (dynamic_cast<CStringLit *>(&node) != nullptr) return true;
+    if (CIdent *identifier = dynamic_cast<CIdent *>(&node)) {
+        const Info *info = lookup(identifier->name());
+        return info != nullptr && info->rank > 0;
+    }
+    if (CIndex *index = dynamic_cast<CIndex *>(&node)) {
+        // A partial index is still an array: 'grid[1]' of an int[2][3] is a
+        // row. Count the subscripts written and compare with the rank.
+        int given = 1;
+        CExpr *walk = &index->base();
+        while (CIndex *deeper = dynamic_cast<CIndex *>(walk)) {
+            walk = &deeper->base();
+            ++given;
+        }
+        if (CIdent *base = dynamic_cast<CIdent *>(walk)) {
+            const Info *info = lookup(base->name());
+            return info != nullptr && info->rank > given;
+        }
+    }
+    return false;
+}
+
 shalimar::ExprPtr CToS::charWrap(shalimar::ExprPtr value) {
     return shalimar::ExprPtr(
         new shalimar::Convert(std::move(value), shalimar::Type::charType()));
@@ -618,6 +641,22 @@ void CToS::visit(CBinary &node) {
     if (op == "&" || op == "|" || op == "^" || op == "<<" || op == ">>") {
         markBeyond(node.offset(),
                    "'" + op + "' - Shalimar has no bitwise operators");
+        expr_.reset();
+        return;
+    }
+
+    // Comparing whole arrays. In C89 's == "abc"' compares two addresses and
+    // is false for two distinct objects; in Shalimar char[] is text and '='
+    // compares what it says. Both compile, and they answer differently -
+    // 'diff' against 'same' - which is the one outcome this converter is
+    // built to refuse. There is no faithful form to fall back on either:
+    // Shalimar has no addresses to compare.
+    if ((op == "==" || op == "!=") &&
+        (isArrayValued(node.lhs()) || isArrayValued(node.rhs()))) {
+        markBeyond(node.offset(),
+                   "'" + op + "' on a whole array - C89 compares the addresses "
+                   "and Shalimar compares the contents; compare elements, or "
+                   "walk them");
         expr_.reset();
         return;
     }
@@ -2105,8 +2144,7 @@ void CToS::lowerPrintf(CCall &call) {
             // program lowered here comes from the same %f convention.
             print->add(shalimar::ExprPtr(new shalimar::Precision(sInt(6))));
             print->add(std::move(item));
-        } else if (spec == 'd' || spec == 'i' || spec == 'g' ||
-                   spec == 'e' || spec == 's' ||
+        } else if (spec == 'd' || spec == 'i' || spec == 's' ||
                    (spec == 'u' && permissions_.narrowing())) {
             // '%u' only under the permission, and for the same reason as the
             // modifiers above: once unsigned has been narrowed to int there
@@ -2123,9 +2161,16 @@ void CToS::lowerPrintf(CCall &call) {
             print->add(charWrap(std::move(item)));
         } else {
             block_ = outerBlock;
+            // '%g' and '%e' were carried here until they were run: both
+            // came out as '?' writes a real, so C's '0.5' and
+            // '5.000000e-01' both printed '0.5000000'. '%f' works because
+            // prec(6) matches its six places; the other two are a choice of
+            // notation and of significant digits, and Shalimar's prec is
+            // neither. Refused rather than printed differently.
             markBeyond(call.offset(),
                        std::string("the '%") + spec + "' format - only plain "
-                       "%d %i %f %g %e %s %c carry");
+                       "%d %i %f %s %c carry, and '?' writes a real in fixed "
+                       "notation");
             return;
         }
         // The item the wraps above settled on is what the function will be
