@@ -150,7 +150,7 @@ rpkg:
 	@echo "rstudio/c2sr is ready: R CMD INSTALL rstudio/c2sr"
 
 clean:
-	rm -rf $(OBJDIR) $(TARGET) rstudio/c2sr/src/core
+	rm -rf $(OBJDIR) $(TARGET) rstudio/c2sr/src/core tests/out
 
 help:
 	@echo "make          build $(TARGET)"
