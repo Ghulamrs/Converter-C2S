@@ -77,21 +77,13 @@ preprocessor and twenty builtins. So:
   and comparison, and `?` prints — and C89 has none of those. Extents travel
   as extra parameters; the rest is generated C.
 
-**One known divergence in this direction, not yet closed.** Shalimar makes
-passing the int limit a runtime error; C wraps. So a Shalimar program that
-stops has a C translation that keeps going with a wrapped value:
-
-```
-a : 1
-for i : 1 to 40 { a : a * 3 ; ? a }
-```
-
-stops at `1162261467` under `shc` and runs to the end in the converted C,
-printing negatives. Closing it means routing every int `+`, `-` and `*`
-through a checking helper — `a * 3` becoming `c2s_mul_int(a, 3, 6)` — which
-is faithful and costs the generated C most of its readability. That trade is
-a decision rather than a defect, and it has not been made. Everything else
-this converter knows it cannot carry is refused, not diverged.
+**Shalimar's int traps are carried across.** Shalimar makes passing the int
+limit a runtime error; C89 wraps and says nothing. So int `+`, `-` and `*`
+become calls to helpers that check first and stop the same way — the same
+message, on stdout, with the same exit status and the same line. It costs the
+generated C some of its readability, which is the price of the two programs
+answering alike. Reals are untouched, overflowing to infinity in both
+languages; divide and modulus are not checked yet.
 
 ---
 

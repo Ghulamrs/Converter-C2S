@@ -369,6 +369,33 @@ void SToC::visit(shalimar::Binary &node) {
         return;
     }
 
+    // Shalimar makes passing the int limit a runtime error; C89 wraps and
+    // says nothing. Left alone, a program that stops under shc runs to the
+    // end after conversion printing wrapped negatives - the one thing this
+    // converter was known to translate into a different answer rather than
+    // refuse. So int '+', '-' and '*' go through helpers that check first
+    // and stop the same way, with the same words on the same stream.
+    //
+    // Reals are untouched: Shalimar's reals overflow to infinity exactly as
+    // C's doubles do, and there is nothing to check. Divide and modulus are
+    // untouched too - their trap is a different one, and 'INT_MIN / -1' is
+    // worth doing deliberately rather than in passing.
+    const bool intOperands =
+        operands != nullptr && operands->kind() == shalimar::Type::Kind::Int;
+    if (intOperands && (node.op() == Op::Add || node.op() == Op::Subtract ||
+                        node.op() == Op::Multiply)) {
+        const char *helper = node.op() == Op::Add
+                                 ? "c2s_add_int"
+                                 : (node.op() == Op::Subtract ? "c2s_sub_int"
+                                                              : "c2s_mul_int");
+        std::vector<CExprPtr> args;
+        args.push_back(expression(node.lhs()));
+        args.push_back(expression(node.rhs()));
+        args.push_back(intLit(currentLine_));
+        expr_ = callHelper(helper, std::move(args));
+        return;
+    }
+
     const char *op = nullptr;
     switch (node.op()) {
         case Op::Add:          op = "+"; break;
@@ -533,6 +560,9 @@ void SToC::visit(shalimar::Call &node) {
 // --------------------------------------------------------------- statements
 
 void SToC::statement(shalimar::Stmt &node) {
+    // Every expression below this belongs to this statement, and the
+    // Shalimar runtime reports an overflow against the statement's line.
+    if (node.line() > 0) currentLine_ = node.line();
     node.accept(*this);
 }
 
@@ -1192,7 +1222,11 @@ std::unique_ptr<CProgram> SToC::convert(shalimar::Program &program) {
 
 std::vector<std::string> SToC::includes() const {
     std::vector<std::string> out;
-    if (usesPrint_) out.push_back("stdio.h");
+    const bool traps = helpers_.count("c2s_add_int") != 0 ||
+                       helpers_.count("c2s_sub_int") != 0 ||
+                       helpers_.count("c2s_mul_int") != 0;
+    if (usesPrint_ || traps) out.push_back("stdio.h");
+    if (traps) out.push_back("stdlib.h");
     if (usesMath_ || helpers_.count("c2s_round") != 0 ||
         helpers_.count("c2s_trunc") != 0 || helpers_.count("c2s_hypot") != 0 ||
         helpers_.count("c2s_min_real") != 0 || helpers_.count("c2s_max_real") != 0 ||
@@ -1348,6 +1382,66 @@ std::string SToC::preamble() const {
             "    if (places < 0) { c2s_places = 7; c2s_grid_places = 6; return; }\n"
             "    c2s_places = places;\n"
             "    c2s_grid_places = places;\n"
+            "}\n";
+    }
+    // One trap per operator, each carrying its own whole message, rather
+    // than one taking the operator as a string.
+    //
+    // That is not a style choice. cc1 refuses a string literal whose entire
+    // content is a single character that could begin an expression -
+    // "*", "+" and "(" are all turned away with "expected an expression",
+    // while "/", "%" and "z" are fine - so c2s_overflow(line, "*") does not
+    // compile under the very compiler this output is written for. Inside a
+    // longer string the same character is unremarkable, which is what these
+    // three do. Recorded here because it is a fault in the oracle, not in
+    // the converter, and the shape of it is easy to trip over again.
+    static const struct { const char *helper; const char *trap; const char *op; }
+        kTraps[] = {
+            {"c2s_add_int", "c2s_overflow_add", "+"},
+            {"c2s_sub_int", "c2s_overflow_sub", "-"},
+            {"c2s_mul_int", "c2s_overflow_mul", "*"},
+        };
+    for (std::size_t i = 0; i < sizeof kTraps / sizeof kTraps[0]; ++i) {
+        if (helpers_.count(kTraps[i].helper) == 0) continue;
+        // The message, the stream and the status are the Shalimar runtime's,
+        // because a differential run compares what the two programs printed:
+        // it goes to stdout, not stderr, and the program leaves with 1.
+        out += std::string("static void ") + kTraps[i].trap + "(int line) {\n" +
+               "    printf(\"Error: line %d: int overflow in '" + kTraps[i].op +
+               "' - use real\\n\", line);\n"
+               "    exit(1);\n"
+               "}\n";
+    }
+    if (helpers_.count("c2s_add_int") != 0) {
+        out +=
+            "static int c2s_add_int(int a, int b, int line) {\n"
+            "    if ((b > 0 && a > 2147483647 - b) ||\n"
+            "        (b < 0 && a < (-2147483647 - 1) - b)) c2s_overflow_add(line);\n"
+            "    return a + b;\n"
+            "}\n";
+    }
+    if (helpers_.count("c2s_sub_int") != 0) {
+        out +=
+            "static int c2s_sub_int(int a, int b, int line) {\n"
+            "    if ((b < 0 && a > 2147483647 + b) ||\n"
+            "        (b > 0 && a < (-2147483647 - 1) + b)) c2s_overflow_sub(line);\n"
+            "    return a - b;\n"
+            "}\n";
+    }
+    if (helpers_.count("c2s_mul_int") != 0) {
+        // Checked by division rather than in a wider type: C89 has no long
+        // long to widen into, so the question is asked of the operands
+        // before the multiply rather than of the answer after it.
+        out +=
+            "static int c2s_mul_int(int a, int b, int line) {\n"
+            "    if (a > 0) {\n"
+            "        if (b > 0) { if (a > 2147483647 / b) c2s_overflow_mul(line); }\n"
+            "        else { if (b < (-2147483647 - 1) / a) c2s_overflow_mul(line); }\n"
+            "    } else if (a < 0) {\n"
+            "        if (b > 0) { if (a < (-2147483647 - 1) / b) c2s_overflow_mul(line); }\n"
+            "        else { if (b < 2147483647 / a) c2s_overflow_mul(line); }\n"
+            "    }\n"
+            "    return a * b;\n"
             "}\n";
     }
     if (helpers_.count("c2s_int_pow") != 0) {

@@ -1,0 +1,7 @@
+This program's output carries its own source line numbers: the overflow
+trap reports the line the statement stands on. --canon drops the comments
+above it and the statement moves, so the reprint stops at a different
+line and prints different text while doing exactly the same thing.
+
+The s2c differential above still covers this case fully - it is the canon
+identity alone that cannot be expressed here.

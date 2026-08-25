@@ -239,8 +239,17 @@ for f in "$here"/cases/defines/*.c; do
 done
 
 # The canonical identities, proved against the same oracles.
+#
+# A case may opt out with a <name>.nocanon file, and exactly one thing
+# earns that: a program whose OUTPUT contains its own source line numbers.
+# --canon reprints the tree, which drops comments and moves every statement,
+# so an int overflow that stops at line 28 in the case stops at line 6 in
+# the reprint - two programs behaving identically and printing different
+# text. The identity being checked here is about behaviour, and that is the
+# one shape where the output cannot express it.
 for f in "$here"/cases/s2c/*.shm; do
     n=$(basename "$f" .shm)
+    if [ -f "$here/cases/s2c/$n.nocanon" ]; then continue; fi
     "$c2s" --canon "$f" -o "$out/canon_$n.shm" 2>"$out/e" || { fails "canon $n: refused"; continue; }
     "$SHC" "$out/canon_$n.shm" -o "$out/cs_$n" 2>"$out/e" || { fails "canon $n: shc refused"; continue; }
     "$out/s_$n" > "$out/o1" 2>&1

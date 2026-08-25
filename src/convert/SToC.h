@@ -139,6 +139,12 @@ private:
     std::map<std::string, bool> helpers_;    // which preamble pieces are used
     int beyondCount_ = 0;
     int tempCount_ = 0;
+    // The line of the statement being converted. Shalimar's expressions
+    // carry no line of their own, and the runtime reports an overflow
+    // against the statement it happened in - so this is latched on the way
+    // into every statement and is what the trap helpers are handed.
+    int currentLine_ = 0;
+
     bool usesPrint_ = false;
     bool usesMath_ = false;
     bool usesStdlib_ = false;

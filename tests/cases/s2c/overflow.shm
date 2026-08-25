@@ -1,0 +1,32 @@
+// Shalimar stops when an int passes its limit; C89 wraps and says
+// nothing. Until the checking helpers existed this was the one thing
+// the converter was known to translate into a different answer rather
+// than refuse: this program stops under shc at 1162261467 and the
+// converted C ran to the end printing wrapped negatives.
+//
+// The value is accumulated in a loop on purpose. shc folds constants
+// hard enough that '2000000000 + 2000000000' is refused when it
+// compiles - even through a function call - so the obvious spellings
+// never reach the runtime at all, which is what made this look
+// theoretical for a while. It is not.
+//
+// What is being compared is the whole of both outputs, the trap
+// included: the message, its line, and the stream it goes to. Shalimar
+// writes it to stdout and leaves with 1, so the generated C does too,
+// and the line is the statement's - which is why SToC latches the line
+// of the statement it is converting rather than asking the expression,
+// Shalimar's expressions carrying no line of their own.
+//
+// Only '+', '-' and '*' are checked. Reals overflow to infinity in both
+// languages alike, and divide and modulus trap for a different reason
+// that is worth doing deliberately.
+fun <> = main() {
+  int a
+  int i
+  a : 1
+  for i : 1 to 40 {
+    a : a * 3
+    ? a
+  }
+  return
+}
