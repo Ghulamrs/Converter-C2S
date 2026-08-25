@@ -1167,8 +1167,18 @@ std::unique_ptr<CProgram> SToC::convert(shalimar::Program &program) {
                         new CDeclaration(std::move(decl->decl())));
                     program_->add(std::move(lifted));
                 } else if (dynamic_cast<CBeyond *>(made[k].get()) != nullptr) {
-                    // Global markers print as declarations of nothing; keep
-                    // the count, note it in the diagnostics stream instead.
+                    // A refusal that stood at file scope. This used to be
+                    // dropped here - the count had already gone up, so the
+                    // run said "1 construct has no expression in the target
+                    // language, and each is marked where it stands in the
+                    // output" over a file with no marker in it at all. What
+                    // was left was a C program missing a declaration, and
+                    // nothing pointed at where it had been.
+                    //
+                    // The C-to-Shalimar direction learned this and its
+                    // markBeyond has carried a program-level fallback since;
+                    // this side had the same hole and no case to find it.
+                    program_->addMarker(std::move(made[k]));
                 }
             }
         }

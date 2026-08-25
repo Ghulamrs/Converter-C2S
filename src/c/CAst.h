@@ -811,25 +811,42 @@ class CProgram {
 public:
     struct Entry {
         bool isFunction;
+
+        // A refusal that stood at file scope: neither a function nor a
+        // declaration, but a comment quoting what could not be carried. It
+        // is here because a marker counted has to be a marker shown - the
+        // run says how many constructs it refused, and a reader looking for
+        // that many must find them.
+        //
+        // Only the Shalimar-to-C direction makes one. A CProgram built by
+        // CParser is the C source as written and never holds a marker, which
+        // is why the C-to-Shalimar walk over order() has no branch for this.
+        bool isMarker;
         std::size_t index;
     };
 
     void add(std::unique_ptr<CFunctionDef> fn) {
-        order_.push_back(Entry{true, functions_.size()});
+        order_.push_back(Entry{true, false, functions_.size()});
         functions_.push_back(std::move(fn));
     }
     void add(std::unique_ptr<CDeclaration> decl) {
-        order_.push_back(Entry{false, declarations_.size()});
+        order_.push_back(Entry{false, false, declarations_.size()});
         declarations_.push_back(std::move(decl));
+    }
+    void addMarker(CStmtPtr marker) {
+        order_.push_back(Entry{false, true, markers_.size()});
+        markers_.push_back(std::move(marker));
     }
 
     std::vector<std::unique_ptr<CFunctionDef>> &functions() { return functions_; }
     std::vector<std::unique_ptr<CDeclaration>> &declarations() { return declarations_; }
+    std::vector<CStmtPtr> &markers() { return markers_; }
     const std::vector<Entry> &order() const { return order_; }
 
 private:
     std::vector<std::unique_ptr<CFunctionDef>> functions_;
     std::vector<std::unique_ptr<CDeclaration>> declarations_;
+    std::vector<CStmtPtr> markers_;
     std::vector<Entry> order_;
 };
 

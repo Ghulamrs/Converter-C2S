@@ -523,6 +523,13 @@ std::string CPrinter::print(CProgram &program) {
     bool first = true;
     for (std::size_t i = 0; i < order.size(); ++i) {
         const CProgram::Entry &entry = order[i];
+        if (entry.isMarker) {
+            // A refusal at file scope, printed where it stood.
+            if (!first) out_ += '\n';
+            stmt(*program.markers()[entry.index]);
+            first = false;
+            continue;
+        }
         if (entry.isFunction) {
             CFunctionDef &fn = *program.functions()[entry.index];
             if (!first) out_ += '\n';
