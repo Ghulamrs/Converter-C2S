@@ -6,25 +6,41 @@
 namespace shalimar {
 namespace {
 
+// **The symbol each one calls.** Where it is a C library name - `sin`, `fabs` -
+// shc emits a call straight to it and the linker resolves it from libm: no
+// wrapper, no generated C, nothing added to the runtime archive. That is what
+// lets the borrowable set grow without the archive growing. docs/FOREIGN.md.
+//
+// Five are NOT library calls and must not become them:
+//
+//   shm_fn_abs_int   traps on INT_MIN rather than negating it. C's abs() is
+//                    undefined there, so this is a different function that
+//                    happens to share a name.
+//   shm_fn_max_real  `a > b ? a : b`, which propagates NaN. fmax() returns the
+//   shm_fn_min_real  non-NaN operand instead, so swapping them changes answers.
+//   shm_fn_max_int   the C library has no integer max or min at all.
+//   shm_fn_min_int
+//
+// `len` is the array handle's own and never was C's.
 const Builtin table[] = {
-    {"abs",   1, Builtin::Shape::IntOrReal, "shm_fn_abs_real", "shm_fn_abs_int"},
-    {"sqrt",  1, Builtin::Shape::Real,      "shm_fn_sqrt",     nullptr},
-    {"log",   1, Builtin::Shape::Real,      "shm_fn_log",      nullptr},
-    {"exp",   1, Builtin::Shape::Real,      "shm_fn_exp",      nullptr},
-    {"hypot", 2, Builtin::Shape::Real,      "shm_fn_hypot",    nullptr},
-    {"sin",   1, Builtin::Shape::Real,      "shm_fn_sin",      nullptr},
-    {"cos",   1, Builtin::Shape::Real,      "shm_fn_cos",      nullptr},
-    {"tan",   1, Builtin::Shape::Real,      "shm_fn_tan",      nullptr},
-    {"asin",  1, Builtin::Shape::Real,      "shm_fn_asin",     nullptr},
-    {"acos",  1, Builtin::Shape::Real,      "shm_fn_acos",     nullptr},
-    {"atan",  1, Builtin::Shape::Real,      "shm_fn_atan",     nullptr},
-    {"atan2", 2, Builtin::Shape::Real,      "shm_fn_atan2",    nullptr},
-    {"pow",   2, Builtin::Shape::Real,      "shm_fn_pow",      nullptr},
-    {"round", 1, Builtin::Shape::Real,      "shm_fn_round",    nullptr},
-    {"ceil",  1, Builtin::Shape::Real,      "shm_fn_ceil",     nullptr},
-    {"floor", 1, Builtin::Shape::Real,      "shm_fn_floor",    nullptr},
+    {"abs",   1, Builtin::Shape::IntOrReal, "fabs", "shm_fn_abs_int"},
+    {"sqrt",  1, Builtin::Shape::Real,      "sqrt",     nullptr},
+    {"log",   1, Builtin::Shape::Real,      "log",      nullptr},
+    {"exp",   1, Builtin::Shape::Real,      "exp",      nullptr},
+    {"hypot", 2, Builtin::Shape::Real,      "hypot",    nullptr},
+    {"sin",   1, Builtin::Shape::Real,      "sin",      nullptr},
+    {"cos",   1, Builtin::Shape::Real,      "cos",      nullptr},
+    {"tan",   1, Builtin::Shape::Real,      "tan",      nullptr},
+    {"asin",  1, Builtin::Shape::Real,      "asin",     nullptr},
+    {"acos",  1, Builtin::Shape::Real,      "acos",     nullptr},
+    {"atan",  1, Builtin::Shape::Real,      "atan",     nullptr},
+    {"atan2", 2, Builtin::Shape::Real,      "atan2",    nullptr},
+    {"pow",   2, Builtin::Shape::Real,      "pow",      nullptr},
+    {"round", 1, Builtin::Shape::Real,      "round",    nullptr},
+    {"ceil",  1, Builtin::Shape::Real,      "ceil",     nullptr},
+    {"floor", 1, Builtin::Shape::Real,      "floor",    nullptr},
 
-    {"trunc", 1, Builtin::Shape::Real,      "shm_fn_trunc",    nullptr},
+    {"trunc", 1, Builtin::Shape::Real,      "trunc",    nullptr},
     {"max",   2, Builtin::Shape::IntOrReal, "shm_fn_max_real", "shm_fn_max_int"},
     {"min",   2, Builtin::Shape::IntOrReal, "shm_fn_min_real", "shm_fn_min_int"},
 
