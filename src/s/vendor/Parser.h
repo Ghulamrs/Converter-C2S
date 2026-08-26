@@ -55,6 +55,7 @@ private:
     bool looksLikeMultiAssignHeader(size_t start) const;
     bool parenGroupHasTopLevelComma(size_t start) const;
 
+    bool parsePrototype(Prototype &proto);
     bool parseUses(Program &program);
     std::unique_ptr<Function> parseFunction();
     Block parseBlock();

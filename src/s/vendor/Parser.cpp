@@ -99,8 +99,22 @@ bool Parser::parseUses(Program &program) {
     const int line = current().line;
     advance();
 
+    // Two forms, told apart by one token. `uses sin, cos` borrows from the
+    // table this compiler carries; `uses <real> = mean(a[]: real)` declares a
+    // function the LINK will provide, and carries its own prototype because
+    // nothing here can go and look one up. `<` cannot start a name, so the
+    // choice needs no lookahead beyond the token in hand.
+    if (atOperator("<")) {
+        Prototype proto;
+        proto.line = line;
+        proto.isForeign = true;
+        if (!parsePrototype(proto)) return false;
+        program.declareForeign(std::move(proto));
+        return true;
+    }
+
     if (!at(Tok::Identifier)) {
-        fail(line, "'uses' needs the name of a library function");
+        fail(line, "'uses' needs a library function's name, or a declaration");
         return false;
     }
 
@@ -122,17 +136,17 @@ bool Parser::parseUses(Program &program) {
     return true;
 }
 
-std::unique_ptr<Function> Parser::parseFunction() {
-    Prototype proto;
-    proto.line = current().line;
-    advance();
-
-    if (!atOperator("<")) { failUnexpected(); return nullptr; }
+// The head of a function: `<outputs> = name(params)`. Shared by `fun`, which
+// follows it with a body, and by the `uses` form, which does not - a foreign
+// declaration IS a function head with nothing after it, and writing the parse
+// twice is how the two would drift apart.
+bool Parser::parsePrototype(Prototype &proto) {
+    if (!atOperator("<")) { failUnexpected(); return false; }
     advance();
 
     while (!atOperator(">") && !atOperator(">=")) {
         const Type *type = scalarTypeHere();
-        if (!type) { failUnexpected(); return nullptr; }
+        if (!type) { failUnexpected(); return false; }
         proto.outputs.push_back(type);
         if (!match(Tok::Comma)) break;
     }
@@ -140,31 +154,31 @@ std::unique_ptr<Function> Parser::parseFunction() {
     if (atOperator(">=")) {
         advance();
     } else {
-        if (!atOperator(">")) { failUnexpected(); return nullptr; }
+        if (!atOperator(">")) { failUnexpected(); return false; }
         advance();
-        if (!atOperator("=")) { failUnexpected(); return nullptr; }
+        if (!atOperator("=")) { failUnexpected(); return false; }
         advance();
     }
 
-    if (!at(Tok::Identifier)) { failUnexpected(); return nullptr; }
+    if (!at(Tok::Identifier)) { failUnexpected(); return false; }
     proto.name = advance().text;
 
-    if (!expect(Tok::ParensOpen, unexpected())) return nullptr;
+    if (!expect(Tok::ParensOpen, unexpected())) return false;
     while (!at(Tok::ParensClose)) {
         Param parameter;
         if (atOperator("&")) { advance(); parameter.byReference = true; }
-        if (!at(Tok::Identifier)) { failUnexpected(); return nullptr; }
+        if (!at(Tok::Identifier)) { failUnexpected(); return false; }
         parameter.name = advance().text;
 
         int rank = 0;
         while (at(Tok::BracketOpen)) {
             advance();
-            if (!expect(Tok::BracketClose, unexpected())) return nullptr;
+            if (!expect(Tok::BracketClose, unexpected())) return false;
             ++rank;
         }
-        if (!expect(Tok::Assign, unexpected())) return nullptr;
+        if (!expect(Tok::Assign, unexpected())) return false;
         const Type *scalar = scalarTypeHere();
-        if (!scalar) { failUnexpected(); return nullptr; }
+        if (!scalar) { failUnexpected(); return false; }
 
         const Type *type = scalar;
         for (int i = 0; i < rank; ++i) type = Type::arrayOf(type);
@@ -174,9 +188,19 @@ std::unique_ptr<Function> Parser::parseFunction() {
         proto.inputs.push_back(parameter);
         if (!match(Tok::Comma)) break;
     }
-    if (!expect(Tok::ParensClose, unexpected())) return nullptr;
+    if (!expect(Tok::ParensClose, unexpected())) return false;
 
     proto.unit = unit_;
+    return true;
+}
+
+std::unique_ptr<Function> Parser::parseFunction() {
+    Prototype proto;
+    proto.line = current().line;
+    advance();
+
+    if (!parsePrototype(proto)) return nullptr;
+
     blockDepth_ = 0;
     Block body = parseBlock();
     if (failed_) return nullptr;

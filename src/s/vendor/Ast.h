@@ -579,6 +579,11 @@ struct Prototype {
 
     int unit = 0;
 
+    // Declared with `uses`, defined by whatever the link is given. Its name
+    // is NOT mangled: shmf_ marks a function this compiler wrote, and this is
+    // somebody else's, called by the name their C gave it.
+    bool isForeign = false;
+
     bool returnsByPointer() const { return outputs.size() > 1; }
 };
 
@@ -644,6 +649,19 @@ public:
     // Per file, per CROSSFILE.md rule 1 - what a file depends on travels with
     // it - so this belongs to the unit, not to the whole program.
     struct Borrowed { std::string name; int line; };
+
+    // A function declared with `uses <real> = f(...)` and defined somewhere
+    // else entirely - a library the link is given. Its prototype is the only
+    // thing this compiler will ever know about it, which is why the
+    // declaration carries one and the table form does not.
+    void declareForeign(Prototype proto) { foreign_.push_back(std::move(proto)); }
+    std::vector<Prototype> &foreign() { return foreign_; }
+    const std::vector<Prototype> &foreign() const { return foreign_; }
+    const Prototype *foreignNamed(const std::string &name) const {
+        for (std::size_t i = 0; i < foreign_.size(); ++i)
+            if (foreign_[i].name == name) return &foreign_[i];
+        return nullptr;
+    }
     void borrow(const std::string &name, int line) {
         borrowed_.push_back(Borrowed{name, line});
     }
@@ -676,6 +694,7 @@ private:
     std::vector<StmtPtr> globals_;
     std::vector<Entry> order_;
     std::vector<Borrowed> borrowed_;
+    std::vector<Prototype> foreign_;
     int globalSlots_ = 0;
     Function initializer_{Prototype(), Block()};
 };

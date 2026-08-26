@@ -479,13 +479,21 @@ void Checker::visit(Call &node) {
     }
 
     Function *callee = user;
+    const Prototype *declared = nullptr;
     if (!callee) {
+        // A `uses` declaration, which carries its own prototype. It is checked
+        // exactly as a written function's is - the declaration IS the contract,
+        // and it is the only thing this compiler will ever know about the
+        // callee.
+        declared = program_->foreignNamed(node.callee());
+    }
+    if (!callee && declared == nullptr) {
         diag_.error(unit_, line_, "Unknown function '" + node.callee() + "'");
         for (ExprPtr &argument : node.arguments()) typeOf(argument);
         return;
     }
-    callee->markCalled();
-    const Prototype &proto = callee->proto();
+    if (callee) callee->markCalled();
+    const Prototype &proto = callee ? callee->proto() : *declared;
     node.resolve(&proto);
 
     if (node.arguments().size() != proto.inputs.size()) {
