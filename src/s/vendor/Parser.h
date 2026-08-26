@@ -28,6 +28,14 @@ private:
     const Token &peek(size_t ahead = 0) const;
     const Token &current() const { return peek(0); }
     bool at(Tok kind) const { return current().kind == kind; }
+
+    // `else if` is `elseif`. Two spellings of one branch, not two constructs:
+    // `else` may otherwise only be followed by `{`, so `else` + `if` has no
+    // other meaning to collide with and this cannot make a valid program mean
+    // something new. It only stops one that was rejected from being rejected.
+    bool atElseIf() const {
+        return at(Tok::ElseIf) || (at(Tok::Else) && peek(1).kind == Tok::If);
+    }
     bool atOperator(const char *spelling) const;
     const Token &advance();
     bool match(Tok kind);

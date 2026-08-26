@@ -419,8 +419,12 @@ StmtPtr Parser::parseIf() {
     if (failed_) return nullptr;
     node->addBranch(std::move(condition), std::move(body));
 
-    while (at(Tok::ElseIf)) {
+    while (atElseIf()) {
+        // One `elseif`, or the two words `else if`. Taking the second token
+        // only when it is there is what keeps a bare `else` falling through to
+        // the branch below.
         advance();
+        if (at(Tok::If)) advance();
         ExprPtr next = parseExpression();
         if (failed_) return nullptr;
         Block branch = parseBlock();
