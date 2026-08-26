@@ -280,7 +280,17 @@ void SPrinter::visit(shalimar::If &node) {
     std::vector<shalimar::If::Branch> &branches = node.branches();
     for (std::size_t i = 0; i < branches.size(); ++i) {
         indent();
-        out_ += i == 0 ? "if " : "elseif ";
+        // **`else if`, not `elseif`.** Both are the same branch to Shalimar,
+        // and this one makes the converted chain the picture of the C it came
+        // from - same words, same order, same layout, with only the condition
+        // losing its parentheses. Reading a conversion against its source is
+        // most of what this tool is for.
+        //
+        // This depends on Compiler-S accepting the two-word form, which it did
+        // not before 2026-08-26. Output from here will not compile with an shc
+        // older than that; `elseif` would have been the safe spelling and is
+        // the one to go back to if that ever matters.
+        out_ += i == 0 ? "if " : "else if ";
         expr(*branches[i].condition, TierOr);
         out_ += " {\n";
         block(branches[i].body);

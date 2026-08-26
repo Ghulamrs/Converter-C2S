@@ -2162,6 +2162,19 @@ void CToS::convertFunction(CFunctionDef &fn) {
     }
 
     scopes_.push_back(std::map<std::string, Info>());
+
+    // **Local names are minted per function, not per file.** Shalimar scopes a
+    // function's locals to that function, so `x` in two functions is two
+    // variables and neither needs a new name. usedNames_ was one set for the
+    // whole unit, so the second `x` became `x_2`, the third `x_2_2`, and a file
+    // of six small functions ended with `x_2_2_2_2_2` - correct, and unreadable
+    // beside the C it came from.
+    //
+    // Restored rather than cleared: what this set holds on entry is the file
+    // scope - globals and every function's name - which locals must still avoid
+    // and which the next function must still see.
+    const std::set<std::string> fileScopeNames = usedNames_;
+
     currentFn_ = &fn;
 
     bool signatureOk = true;
@@ -2232,6 +2245,7 @@ void CToS::convertFunction(CFunctionDef &fn) {
     }
 
     scopes_.pop_back();
+    usedNames_ = fileScopeNames;
 
     std::unique_ptr<shalimar::Function> made(
         new shalimar::Function(std::move(proto), std::move(body)));
