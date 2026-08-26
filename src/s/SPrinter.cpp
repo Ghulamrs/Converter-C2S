@@ -423,6 +423,31 @@ std::string SPrinter::print(shalimar::Program &program) {
     out_.clear();
     depth_ = 0;
 
+    // What the converted program borrows, one clause at the top. Shalimar has
+    // no library function until a file asks for it - see
+    // ../Compiler-S/docs/FOREIGN.md - so output that calls `sqrt` and does not
+    // say so does not compile.
+    //
+    // De-duplicated in order of first use, which keeps the line stable: a
+    // program calling sin twice and cos once reads `uses sin, cos` however the
+    // calls are arranged in the file.
+    std::vector<std::string> borrowed;
+    for (std::size_t i = 0; i < program.borrowed().size(); ++i) {
+        const std::string &name = program.borrowed()[i].name;
+        bool seen = false;
+        for (std::size_t j = 0; j < borrowed.size(); ++j)
+            if (borrowed[j] == name) { seen = true; break; }
+        if (!seen) borrowed.push_back(name);
+    }
+    if (!borrowed.empty()) {
+        out_ += "uses ";
+        for (std::size_t i = 0; i < borrowed.size(); ++i) {
+            if (i > 0) out_ += ", ";
+            out_ += borrowed[i];
+        }
+        out_ += "\n\n";
+    }
+
     const std::vector<shalimar::Program::Entry> &order = program.order();
     bool first = true;
     for (std::size_t i = 0; i < order.size(); ++i) {

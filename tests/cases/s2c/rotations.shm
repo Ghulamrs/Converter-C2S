@@ -10,6 +10,9 @@
 // pi/4, not pi/2: at a right angle
 // every entry is 0 or 1 whether the
 // trig ran or not.
+
+uses sin, cos
+
 fun <> = ROX(angle: real) {
   X : {{1.0,         0.,          0.},
        {0.,  cos(angle),  sin(angle)},

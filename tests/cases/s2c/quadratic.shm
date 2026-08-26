@@ -1,4 +1,7 @@
 // quadratic.shm
+
+uses sqrt
+
 fun <> = main() {
   a : 1
   b : -5

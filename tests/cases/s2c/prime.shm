@@ -1,6 +1,9 @@
 // prime.shm
 // Two outputs: the remainder and the
 // factor that produced it.
+
+uses sqrt, ceil
+
 fun <int,int> = prime(n: int) {
    int i : 2
    int m : 1

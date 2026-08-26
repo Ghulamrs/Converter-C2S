@@ -649,6 +649,15 @@ public:
     }
     const std::vector<Borrowed> &borrowed() const { return borrowed_; }
 
+    // Did this file ask for that name? A library function is only a library
+    // function where it was borrowed; everywhere else it is an ordinary
+    // identifier, which is the whole point of `uses`.
+    bool borrows(const std::string &name) const {
+        for (std::size_t i = 0; i < borrowed_.size(); ++i)
+            if (borrowed_[i].name == name) return true;
+        return false;
+    }
+
     std::vector<std::unique_ptr<Function>> &functions() { return functions_; }
     const std::vector<std::unique_ptr<Function>> &functions() const { return functions_; }
     std::vector<StmtPtr> &globals() { return globals_; }

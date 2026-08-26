@@ -5,6 +5,9 @@
 // x is filled in place and the
 // sweep count returned. A must be
 // diagonally dominant.
+
+uses abs, max
+
 fun <int> = solve(A[][]: real,
                   b[]: real,
                   x[]: real) {

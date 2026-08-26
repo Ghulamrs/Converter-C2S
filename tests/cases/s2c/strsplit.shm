@@ -2,6 +2,9 @@
 // Split a string in two. An array
 // cannot be returned, so the pieces
 // go in and are filled.
+
+uses min
+
 fun <int> = split(s[]: char,
                   a[]: char,
                   b[]: char) {

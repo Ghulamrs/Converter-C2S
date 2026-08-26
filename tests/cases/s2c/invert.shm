@@ -2,6 +2,9 @@
 // Gauss-Jordan without pivoting, in
 // place: a becomes its inverse and
 // the determinant is returned.
+
+uses abs
+
 fun <real> = invert(a[][]: real) {
   real tol : 1.0e-30
   real det : 1.0

@@ -1,6 +1,9 @@
 // sqroot.shm
 // Newton's method: the loop that
 // sqrt() hides.
+
+uses abs, sqrt
+
 fun <real> = root(n: real) {
   real x : 0.0
   real last : 0.0

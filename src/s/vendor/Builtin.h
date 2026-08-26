@@ -23,6 +23,8 @@ struct Builtin {
 };
 
 int findBuiltin(const std::string &name);
+// Why a name a person is likely to try cannot be borrowed, or null.
+const char *whyNotBorrowable(const std::string &name);
 const Builtin &builtin(int index);
 int builtinCount();
 

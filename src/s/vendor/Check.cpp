@@ -85,6 +85,26 @@ void Checker::reportUndefined(const std::string &name) {
 bool Checker::check(Program &program) {
     program_ = &program;
 
+    // What the file said it borrows, checked before anything uses it, so that
+    // a name it cannot have is reported where it was asked for rather than at
+    // the call - which may be pages away, or in another file entirely.
+    //
+    // Borrowing something and never calling it is not an error: it costs
+    // nothing and emits nothing, and a file that borrows a set for the project
+    // it belongs to should not be nagged about the ones it did not reach for.
+    // docs/FOREIGN.md, rule 4.
+    for (std::size_t i = 0; i < program.borrowed().size(); ++i) {
+        const Program::Borrowed &b = program.borrowed()[i];
+        if (findBuiltin(b.name) >= 0) continue;
+
+        if (const char *why = whyNotBorrowable(b.name)) {
+            diag_.error(unit_, b.line, "'" + b.name + "' " + why);
+        } else {
+            diag_.error(unit_, b.line,
+                        "'" + b.name + "' is not a library function this compiler knows");
+        }
+    }
+
     for (StmtPtr &s : program.globals()) {
         Declare &declaration = static_cast<Declare &>(*s);
         if (!laterGlobals_.count(declaration.name())) {
@@ -421,7 +441,13 @@ void Checker::visit(Call &node) {
     // headers - sin is <math.h>'s until you declare your own - said here
     // without needing headers to say it.
     Function *user = program_->find(node.callee());
-    const int which = user != nullptr ? -1 : findBuiltin(node.callee());
+    // **And only if this file borrowed it.** A library function is not
+    // available by being known; it is available by being asked for. Without
+    // the `uses` the name falls through to the ordinary search for a function
+    // in the project's other files, and is reported missing like any other.
+    const int which = (user != nullptr || !program_->borrows(node.callee()))
+                          ? -1
+                          : findBuiltin(node.callee());
     if (which >= 0) {
         const Builtin &fn = builtin(which);
         node.resolveBuiltin(which);

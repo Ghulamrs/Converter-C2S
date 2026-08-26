@@ -659,6 +659,13 @@ void CToS::visit(CCall &node) {
     std::string sName;
     if (builtin != nullptr) {
         sName = builtin;
+        // Shalimar borrows a library function rather than having it, so the
+        // output has to say what it uses. Recorded here, at the one place a C
+        // call is recognised as one, and printed as a `uses` clause by
+        // SPrinter. Program::borrow keeps no duplicates out, and does not need
+        // to: an unused or repeated borrow is ignored by design, and the
+        // printer folds them into one line.
+        program_->borrow(sName, lineOf(node.offset()));
     } else if (knownFunctions_.count(name) != 0) {
         const Info *info = lookup(name);
         sName = info != nullptr ? info->sName : name;

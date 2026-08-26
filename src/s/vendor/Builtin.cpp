@@ -35,6 +35,40 @@ const int count = static_cast<int>(sizeof table / sizeof table[0]);
 
 }
 
+// Names a person will reasonably try, and the reason each one cannot be
+// borrowed. Not a blocklist: every entry here is refused because its C
+// signature needs a type Shalimar does not have, and saying which type is the
+// difference between an answer and a refusal. docs/FOREIGN.md explains why
+// the boundary falls exactly here.
+//
+// The list is short on purpose. It exists to turn the most likely mistakes
+// into instructions; anything not on it still gets a plain "not a library
+// function this compiler knows", which is true and not misleading.
+namespace {
+struct Unborrowable { const char *name; const char *why; };
+const Unborrowable kUnborrowable[] = {
+    {"memset",  "takes a pointer, which Shalimar has no type for"},
+    {"memcpy",  "takes a pointer, which Shalimar has no type for"},
+    {"strlen",  "takes a pointer, which Shalimar has no type for"},
+    {"strcpy",  "takes a pointer, which Shalimar has no type for"},
+    {"strcmp",  "takes a pointer, which Shalimar has no type for"},
+    {"malloc",  "returns a pointer, which Shalimar has no type for"},
+    {"free",    "takes a pointer, which Shalimar has no type for"},
+    {"fopen",   "returns a pointer, which Shalimar has no type for"},
+    {"qsort",   "takes a function pointer, which Shalimar has no type for"},
+    {"printf",  "takes a variable number of arguments, which Shalimar has no form for"},
+    {"scanf",   "takes a variable number of arguments, which Shalimar has no form for"},
+    {"modf",    "writes through a pointer; a two-output 'fun' is the Shalimar shape for it"},
+    {"frexp",   "writes through a pointer; a two-output 'fun' is the Shalimar shape for it"},
+};
+}
+
+const char *whyNotBorrowable(const std::string &name) {
+    for (std::size_t i = 0; i < sizeof kUnborrowable / sizeof kUnborrowable[0]; ++i)
+        if (name == kUnborrowable[i].name) return kUnborrowable[i].why;
+    return nullptr;
+}
+
 int findBuiltin(const std::string &name) {
     for (int i = 0; i < count; ++i) {
         if (name == table[i].name) return i;
