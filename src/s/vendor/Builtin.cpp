@@ -41,6 +41,19 @@ const Builtin table[] = {
     {"floor", 1, Builtin::Shape::Real,      "floor",    nullptr},
 
     {"trunc", 1, Builtin::Shape::Real,      "trunc",    nullptr},
+
+    // Added 2026-08-26, and each one is a row and nothing else: the symbol is
+    // libm's, so there is no wrapper to write and the archive does not grow.
+    // C99 rather than C89 - log2, cbrt and the hyperbolics postdate the
+    // standard Compiler-C targets - but this is a call into the platform's
+    // libm, not a C program, and all three of ours have them.
+    {"fmod",  2, Builtin::Shape::Real,      "fmod",     nullptr},
+    {"sinh",  1, Builtin::Shape::Real,      "sinh",     nullptr},
+    {"cosh",  1, Builtin::Shape::Real,      "cosh",     nullptr},
+    {"tanh",  1, Builtin::Shape::Real,      "tanh",     nullptr},
+    {"log10", 1, Builtin::Shape::Real,      "log10",    nullptr},
+    {"log2",  1, Builtin::Shape::Real,      "log2",     nullptr},
+    {"cbrt",  1, Builtin::Shape::Real,      "cbrt",     nullptr},
     {"max",   2, Builtin::Shape::IntOrReal, "shm_fn_max_real", "shm_fn_max_int"},
     {"min",   2, Builtin::Shape::IntOrReal, "shm_fn_min_real", "shm_fn_min_int"},
 

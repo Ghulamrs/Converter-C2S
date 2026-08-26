@@ -67,7 +67,7 @@ checks exactly that by compiling and running both sides.
 
 C89 is a general systems language; Shalimar is a small whole-program numeric
 language with three scalar types, no pointers, no aggregate but the array, no
-preprocessor, and twenty library functions each of which a file must borrow
+preprocessor, and a set of library functions each of which a file must borrow
 with `uses` before it may call it. So:
 
 - **C89 → Shalimar is mostly a rejection problem.** Most of C has no target.

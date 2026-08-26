@@ -33,16 +33,31 @@ bool isShalimarReserved(const std::string &name) {
     return false;
 }
 
+// Which Shalimar library function a C call becomes, or null.
+//
+// **Asked of the vendored table rather than listed here.** A hand-written copy
+// of that table is a copy that drifts, and this one had: it knew fourteen names
+// and Shalimar had twenty, so `hypot`, `round` and `trunc` converted to nothing
+// while being perfectly available. Seven more were added on 2026-08-26 and this
+// would have missed those too.
+//
+// Shalimar borrowed the C names unchanged, so the mapping is identity wherever
+// the table has a row. Three exceptions, and each is a name that means
+// something different on the two sides:
+//
+//   fabs  C spells the real one `fabs`; Shalimar's `abs` covers both.
+//   max   Shalimar's are `a > b ? a : b` and propagate NaN. C's nearest are
+//   min   fmax/fmin, which return the non-NaN operand - a different function,
+//         so a C program calling one must not silently become the other. (C89
+//         has no max or min at all, so cc1 refuses the bare names anyway.)
+//   len   an array's own, never C's.
 const char *builtinFor(const std::string &name) {
-    static const char *const same[] = {
-        "sqrt", "log", "exp", "sin", "cos", "tan", "asin", "acos", "atan",
-        "atan2", "pow", "ceil", "floor", "abs"
-    };
-    for (std::size_t i = 0; i < sizeof same / sizeof same[0]; ++i) {
-        if (name == same[i]) return same[i];
-    }
     if (name == "fabs") return "abs";
-    return nullptr;
+    if (name == "max" || name == "min" || name == "len") return nullptr;
+
+    const int which = shalimar::findBuiltin(name);
+    if (which < 0) return nullptr;
+    return shalimar::builtin(which).name;
 }
 
 shalimar::ExprPtr sInt(long long value) {
@@ -672,7 +687,7 @@ void CToS::visit(CCall &node) {
     } else {
         markBeyond(node.offset(),
                    "'" + name + "' - not defined in this file, and not one of "
-                   "the twenty library functions Shalimar can borrow");
+                   "the library functions Shalimar can borrow");
         expr_.reset();
         return;
     }

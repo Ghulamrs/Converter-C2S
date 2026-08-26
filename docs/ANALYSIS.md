@@ -24,7 +24,7 @@ Standard: ISO C++14, to match both compilers.
 
 The two languages are not siblings. C89 is a general systems language; Shalimar is a
 small whole-program numeric language with three scalar types, no pointers, no
-aggregates but the array, no preprocessor, and twenty library functions that a file must borrow with
+aggregates but the array, no preprocessor, and a set of library functions that a file must borrow with
 `uses` before calling.
 
 That asymmetry decides the character of each direction:
@@ -316,7 +316,7 @@ works.
   (`tests/cases/c2s/counters.c` and `tests/cases/c2s/skipping.c`.)
 
 **Variadic functions** are refused, but not as variadic: a call to one is
-turned down for being a name neither defined in the file nor one of the twenty
+turned down for being a name neither defined in the file nor one of the
 borrowable library functions. A *definition* never gets that far — it needs `va_list`, a typedef
 from a header this converter drops unread, so the parser meets two identifiers
 and reports a syntax error. The "headers are not converted" rule holds for
@@ -325,7 +325,7 @@ a header would have introduced as **types**. See `tests/cases/beyond/variadic.c`
 
 **Absent library** — the whole of `<stdio.h>`, `<stdlib.h>`, `<string.h>`,
 `<ctype.h>`, `<time.h>`, `<assert.h>`, `errno`, `malloc`/`free`. `<math.h>` is the one
-header with coverage, through 20 borrowable functions plus `pi` and `e`, emitted
+header with coverage, through the borrowable functions plus `pi` and `e`, emitted
 as a `uses` clause. The rest have no Shalimar type to be written in, which is
 the same boundary `Compiler-S/docs/FOREIGN.md` draws. There is **no input
 facility in Shalimar at all**, so any program that reads has no translation.
