@@ -12,7 +12,14 @@
 
 namespace {
 
-const char *kVersion = "c2s 0.1";
+// 1.2, numbered with the group rather than on its own. c2s is only ever used
+// beside a particular cc1 and shc - it runs both as oracles - so a number that
+// did not move with theirs would say less than nothing.
+//
+// 1.2 is the release in which Shalimar gained `uses`: this converter emits the
+// clause now, because output that calls sqrt and does not say so no longer
+// compiles.
+const char *kVersion = "c2s 1.2";
 
 const int kOk = 0;
 const int kRefused = 1;
