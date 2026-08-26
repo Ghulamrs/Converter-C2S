@@ -1,0 +1,36 @@
+// An if-chain written both ways, to be carried into C both ways.
+//
+// `elseif` and a nested `else { if ... }` are the same tree, and CPrinter now
+// writes both as C's own `else if` chain rather than stepping one indent per
+// branch. This case is here for the behaviour; the shape is the reason it was
+// written.
+fun <> = main() {
+  int x
+  for x : 0 to 5 {
+    if x = 0 {
+      ? "zero"
+    }
+    elseif x = 1 {
+      ? "one"
+    }
+    else {
+      if x = 2 {
+        ? "two"
+      }
+      else {
+        if x = 3 {
+          ? "three"
+        }
+        else {
+          // Braces that carry more than an if must survive as braces: this
+          // arm runs its second statement whatever the condition said.
+          if x = 4 {
+            ? "four"
+          }
+          ? "and past it"
+        }
+      }
+    }
+  }
+  return
+}
