@@ -363,6 +363,30 @@ void SPrinter::block(shalimar::Block &body) {
     --depth_;
 }
 
+// A function's body, which is a block plus one piece of punctuation: **a blank
+// line between the declarations and the code**. Shalimar gathers every
+// declaration at the top of a function, so that run can be long, and without
+// the gap the first real statement is just the next line down. Only the
+// leading run counts - a `Declare` further in belongs to whatever it sits
+// among and gets no line of its own.
+void SPrinter::functionBody(shalimar::Block &body) {
+    std::size_t declarations = 0;
+    while (declarations < body.size() &&
+           dynamic_cast<shalimar::Declare *>(body[declarations].get()) != nullptr) {
+        ++declarations;
+    }
+
+    ++depth_;
+    for (std::size_t i = 0; i < body.size(); ++i) {
+        // Not when the whole body is declarations, and not when there are
+        // none: a blank line at the end of a function, or at the start of one,
+        // is a gap around nothing.
+        if (i == declarations && declarations > 0) out_ += '\n';
+        statement(*body[i]);
+    }
+    --depth_;
+}
+
 void SPrinter::functionHeader(const shalimar::Prototype &proto) {
     indent();
     out_ += "fun <";
@@ -385,7 +409,14 @@ void SPrinter::functionHeader(const shalimar::Prototype &proto) {
         out_ += ": ";
         out_ += type != nullptr ? type->scalar()->spelling() : "int";
     }
-    out_ += ") {\n";
+    // **The function's `{` goes on its own line**, while `if`, `while` and
+    // `for` keep theirs on the same line as the condition. That mix is not an
+    // oversight - it is how the language is written by hand: the head of a
+    // function is a thing you read on its own, and a control-flow brace reads
+    // as part of the line that opens it.
+    out_ += ")\n";
+    indent();
+    out_ += "{\n";
 }
 
 std::string SPrinter::print(shalimar::Program &program) {
@@ -401,7 +432,7 @@ std::string SPrinter::print(shalimar::Program &program) {
             if (fn.isRejected()) continue;
             if (!first) out_ += '\n';
             functionHeader(fn.proto());
-            block(fn.body());
+            functionBody(fn.body());
             out_ += "}\n";
         } else {
             shalimar::Stmt &global = *program.globals()[entry.index];

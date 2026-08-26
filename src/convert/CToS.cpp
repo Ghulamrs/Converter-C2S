@@ -2244,6 +2244,8 @@ void CToS::convertFunction(CFunctionDef &fn) {
 
     }
 
+    foldOpeningAssignments(body);
+
     scopes_.pop_back();
     usedNames_ = fileScopeNames;
 
@@ -2253,6 +2255,119 @@ void CToS::convertFunction(CFunctionDef &fn) {
     currentIsMain_ = false;
     currentReturnsChar_ = false;
     currentFn_ = nullptr;
+}
+
+// ---- folding an opening assignment back into its declaration ---------------
+//
+// C says `double r = 0.0;` and Shalimar can say `real r : 0.0`, but the
+// converter said `real r` and then `r : 0.0` on the next line. That is not an
+// oversight: declarations are HOISTED to the top of the function, because C89
+// puts them at the top of a block and Shalimar wants them at the top of a
+// function. Once a declaration moves, its initialiser usually cannot follow -
+// inside a loop or one arm of an `if` it has to run where it was written, not
+// once at entry.
+//
+// So the fold is only safe for an assignment that already runs exactly once,
+// unconditionally, at function entry: one of the leading statements of the
+// function body, before anything branches or repeats.
+//
+// Three conditions, and the third is the one that is easy to miss.
+
+// Does this expression read any of `pending`? Used to refuse folding an
+// initialiser that would then run BEFORE the thing it reads was given a value.
+static bool readsAnyOf(shalimar::Expr &e, const std::set<std::string> &pending) {
+    if (pending.empty()) return false;
+    if (shalimar::Var *v = dynamic_cast<shalimar::Var *>(&e))
+        return pending.count(v->name()) != 0;
+    if (shalimar::Binary *b = dynamic_cast<shalimar::Binary *>(&e))
+        return readsAnyOf(b->lhs(), pending) || readsAnyOf(b->rhs(), pending);
+    if (shalimar::Convert *c = dynamic_cast<shalimar::Convert *>(&e))
+        return readsAnyOf(c->expr(), pending);
+    if (shalimar::Index *ix = dynamic_cast<shalimar::Index *>(&e))
+        return readsAnyOf(ix->base(), pending) || readsAnyOf(ix->index(), pending);
+    if (shalimar::Call *call = dynamic_cast<shalimar::Call *>(&e)) {
+        std::vector<shalimar::ExprPtr> &args = call->arguments();
+        for (std::size_t i = 0; i < args.size(); ++i)
+            if (readsAnyOf(*args[i], pending)) return true;
+        return false;
+    }
+    if (shalimar::ArrayLit *lit = dynamic_cast<shalimar::ArrayLit *>(&e)) {
+        std::vector<shalimar::ExprPtr> &els = lit->elements();
+        for (std::size_t i = 0; i < els.size(); ++i)
+            if (readsAnyOf(*els[i], pending)) return true;
+        return false;
+    }
+    if (shalimar::Dim *d = dynamic_cast<shalimar::Dim *>(&e)) {
+        bool hit = readsAnyOf(*d->base(), pending);
+        if (!hit && d->axis() != nullptr) hit = readsAnyOf(*d->axis(), pending);
+        return hit;
+    }
+    // Literals and Blank read nothing. Anything unrecognised is treated as if
+    // it might read anything, which refuses the fold rather than risking it.
+    if (dynamic_cast<shalimar::IntLit *>(&e) != nullptr) return false;
+    if (dynamic_cast<shalimar::RealLit *>(&e) != nullptr) return false;
+    if (dynamic_cast<shalimar::StrLit *>(&e) != nullptr) return false;
+    if (dynamic_cast<shalimar::Blank *>(&e) != nullptr) return false;
+    return true;
+}
+
+void CToS::foldOpeningAssignments(shalimar::Block &body) {
+    // The leading declarations. hoistDeclarations put them here and the lift
+    // temporaries were pushed in front of them, so the run starts at 0.
+    std::size_t firstStatement = 0;
+    while (firstStatement < body.size() &&
+           dynamic_cast<shalimar::Declare *>(body[firstStatement].get()) != nullptr) {
+        ++firstStatement;
+    }
+
+    // Every local declared here and not yet given a value. An initialiser that
+    // reads one of these cannot be folded, because folding moves it above the
+    // statement that would have set it.
+    std::set<std::string> pending;
+    for (std::size_t i = 0; i < firstStatement; ++i) {
+        shalimar::Declare *d = static_cast<shalimar::Declare *>(body[i].get());
+        if (d->initial() == nullptr) pending.insert(d->name());
+    }
+
+    // **Folds must keep their order among themselves.** Two initialisers that
+    // both move end up in DECLARATION order, not statement order, so folding
+    // `b : f()` and then `a : g()` would run g() before f() when the program
+    // ran f() first. Only ever folding into a later declaration than the last
+    // one folded keeps the two orders the same. Nothing else in the run
+    // reorders: a declaration with no initialiser does nothing at all.
+    std::size_t lastFolded = 0;
+    bool haveFolded = false;
+
+    std::size_t at = firstStatement;
+    while (at < body.size()) {
+        shalimar::Assign *assign = dynamic_cast<shalimar::Assign *>(body[at].get());
+        if (assign == nullptr) break;
+        shalimar::Var *target = dynamic_cast<shalimar::Var *>(assign->target().get());
+        if (target == nullptr) break;
+
+        // Which declaration does it name?
+        std::size_t k = firstStatement;
+        for (std::size_t i = 0; i < firstStatement; ++i) {
+            shalimar::Declare *d = static_cast<shalimar::Declare *>(body[i].get());
+            if (d->name() == target->name()) { k = i; break; }
+        }
+        if (k == firstStatement) break;
+
+        shalimar::Declare *decl = static_cast<shalimar::Declare *>(body[k].get());
+
+        // Already initialised, an array, out of order, or reading something not
+        // set yet - leave this one and everything after it alone.
+        if (decl->initial() != nullptr) break;
+        if (!decl->extents().empty()) break;
+        if (haveFolded && k <= lastFolded) break;
+        if (readsAnyOf(*assign->expr(), pending)) break;
+
+        decl->initial() = std::move(assign->expr());
+        pending.erase(decl->name());
+        body.erase(body.begin() + static_cast<std::ptrdiff_t>(at));
+        lastFolded = k;
+        haveFolded = true;
+    }
 }
 
 std::unique_ptr<shalimar::Program> CToS::convert(CProgram &program) {

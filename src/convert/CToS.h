@@ -154,6 +154,11 @@ private:
     std::map<std::size_t, Info> hoisted_;
 
     std::map<std::size_t, SwitchTemps> switchTemps_;
+    // Folds `int r` + `r : 0` back into `int r : 0`, but only for the leading
+    // statements of a function, which are the only ones that run exactly once
+    // at entry the way a declaration's initialiser does.
+    void foldOpeningAssignments(shalimar::Block &body);
+
     std::set<std::string> usedNames_;
     std::set<std::string> knownFunctions_;
 

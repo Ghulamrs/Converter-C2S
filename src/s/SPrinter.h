@@ -59,6 +59,7 @@ private:
     void expr(shalimar::Expr &node, int floor);
     void statement(shalimar::Stmt &node);
     void block(shalimar::Block &body);
+    void functionBody(shalimar::Block &body);
     void functionHeader(const shalimar::Prototype &proto);
     void declare(shalimar::Declare &node);
 
