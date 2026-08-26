@@ -26,11 +26,25 @@ TARGET := $(BINDIR)/c2s.exe
 # src/s/vendor is the Shalimar front end carried over from Compiler-S. It is
 # a copy, not a link - see CLAUDE.md - and it has to be compiled here like
 # everything else, or every shalimar:: symbol goes missing at the link.
-SRCS := $(wildcard src/*.cpp) \
+# **Names with a space in them are filtered out, and that is not fussiness.**
+# macOS leaves "keep both" duplicates - `Ast 2.cpp` beside `Ast.cpp` - and a
+# wildcard picks one up, make splits the name on the space, and the build tries
+# to link a program called `Ast`. The error is `undefined symbol _main` in a
+# file nobody wrote, which is a long way from the cause. They have appeared in
+# src/s/vendor twice in one day, once after being deleted.
+#
+# No source in this repository has a space in its name, so nothing real is lost
+# and the build stops depending on the directory being tidy.
+# `$(filter src/%.cpp,...)` and not a test for a space: by the time $(wildcard)
+# has run, `Ast 2.cpp` is already the two words `src/s/vendor/Ast` and `2.cpp`,
+# so there is no space left to look for. Make cannot hold such a name at all.
+# Requiring the src/ prefix AND the .cpp suffix drops both halves - the first
+# has no suffix, the second has no prefix - and keeps every real source.
+SRCS := $(filter src/%.cpp,$(wildcard src/*.cpp) \
         $(wildcard src/c/*.cpp) \
         $(wildcard src/s/*.cpp) \
         $(wildcard src/s/vendor/*.cpp) \
-        $(wildcard src/convert/*.cpp)
+        $(wildcard src/convert/*.cpp))
 
 OBJS := $(patsubst src/%.cpp,$(OBJDIR)/%.o,$(SRCS))
 DEPS := $(OBJS:.o=.d)

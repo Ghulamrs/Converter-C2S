@@ -93,6 +93,27 @@ bool Checker::check(Program &program) {
     // nothing and emits nothing, and a file that borrows a set for the project
     // it belongs to should not be nagged about the ones it did not reach for.
     // docs/FOREIGN.md, rule 4.
+    // A foreign declaration must describe something a C function can actually
+    // be. Two outputs cannot: shc returns them through a scratch block whose
+    // address it passes in a register of its own choosing - a convention that
+    // is fine while both ends are code this compiler wrote, and is not written
+    // down anywhere for anybody else to implement. It parses, emits and links,
+    // and would simply be wrong, which is the worst of the four.
+    //
+    // A C function returning two values does it through a pointer parameter,
+    // and Shalimar has no pointer type - so there is no spelling of this that
+    // would work, and refusing is the whole answer rather than a limitation to
+    // be lifted later.
+    for (std::size_t i = 0; i < program.foreign().size(); ++i) {
+        const Prototype &f = program.foreign()[i];
+        if (f.outputs.size() > 1) {
+            diag_.error(unit_, f.line,
+                        "'" + f.name + "' is declared with " +
+                        std::to_string(f.outputs.size()) +
+                        " outputs; a library function may answer at most one");
+        }
+    }
+
     for (std::size_t i = 0; i < program.borrowed().size(); ++i) {
         const Program::Borrowed &b = program.borrowed()[i];
         if (findBuiltin(b.name) >= 0) continue;
