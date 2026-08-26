@@ -19,6 +19,9 @@ two compilers are built under.
 **Headers are not converted.** A C source is preprocessed so that its
 declarations resolve — `cc1` refuses an undeclared name, so `sqrt` will not
 parse without `<math.h>` — but nothing that came from a header is translated.
+The one thing a header leaves behind is the borrow: a converted program that
+calls `sqrt` is emitted with `uses sqrt` at the top, because Shalimar has no
+library function until a file asks for one.
 Only what the named file itself contributed reaches the output.
 
 **A preprocessor construct that decides *which program this is* is reported,
@@ -64,7 +67,8 @@ checks exactly that by compiling and running both sides.
 
 C89 is a general systems language; Shalimar is a small whole-program numeric
 language with three scalar types, no pointers, no aggregate but the array, no
-preprocessor and twenty builtins. So:
+preprocessor, and twenty library functions each of which a file must borrow
+with `uses` before it may call it. So:
 
 - **C89 → Shalimar is mostly a rejection problem.** Most of C has no target.
   The work is deciding precisely what cannot be said, saying where, and

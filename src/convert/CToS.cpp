@@ -672,7 +672,7 @@ void CToS::visit(CCall &node) {
     } else {
         markBeyond(node.offset(),
                    "'" + name + "' - not defined in this file, and not one of "
-                   "Shalimar's twenty builtins");
+                   "the twenty library functions Shalimar can borrow");
         expr_.reset();
         return;
     }

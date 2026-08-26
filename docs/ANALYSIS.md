@@ -24,7 +24,8 @@ Standard: ISO C++14, to match both compilers.
 
 The two languages are not siblings. C89 is a general systems language; Shalimar is a
 small whole-program numeric language with three scalar types, no pointers, no
-aggregates but the array, no preprocessor, and twenty builtins.
+aggregates but the array, no preprocessor, and twenty library functions that a file must borrow with
+`uses` before calling.
 
 That asymmetry decides the character of each direction:
 
@@ -239,6 +240,7 @@ source has to become one or more `//` lines if comments are carried across at al
 | `0x1F`, `010`, `1U`, `1L`, `1.0f` | decimal, unsuffixed | no hex, no octal, no suffixes |
 | block-scoped locals | hoisted to a top-of-function `Declare`, α-renamed on shadowing | `Function::blocks()` gives the scope tree to do this correctly |
 | `int a, b, c;` | three declarations | one name per declaration |
+| `#include <math.h>` then `sqrt(x)` | `uses sqrt` at the top of the file, then `sqrt(x)` | the header itself is dropped unread; the borrow is the only thing it leaves behind |
 | `/* … */` | `// …` | |
 
 ### 6.3 Must raise a conversion error
@@ -315,7 +317,7 @@ works.
 
 **Variadic functions** are refused, but not as variadic: a call to one is
 turned down for being a name neither defined in the file nor one of the twenty
-builtins. A *definition* never gets that far — it needs `va_list`, a typedef
+borrowable library functions. A *definition* never gets that far — it needs `va_list`, a typedef
 from a header this converter drops unread, so the parser meets two identifiers
 and reports a syntax error. The "headers are not converted" rule holds for
 calls, which C89 lets you read without a prototype; it does not hold for names
@@ -323,7 +325,9 @@ a header would have introduced as **types**. See `tests/cases/beyond/variadic.c`
 
 **Absent library** — the whole of `<stdio.h>`, `<stdlib.h>`, `<string.h>`,
 `<ctype.h>`, `<time.h>`, `<assert.h>`, `errno`, `malloc`/`free`. `<math.h>` is the one
-header with coverage, through 20 builtins plus `pi` and `e`. There is **no input
+header with coverage, through 20 borrowable functions plus `pi` and `e`, emitted
+as a `uses` clause. The rest have no Shalimar type to be written in, which is
+the same boundary `Compiler-S/docs/FOREIGN.md` draws. There is **no input
 facility in Shalimar at all**, so any program that reads has no translation.
 
 **Structural** — `main(int argc, char **argv)` (Shalimar's `main` takes nothing),
