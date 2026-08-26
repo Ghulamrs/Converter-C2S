@@ -13,7 +13,14 @@ CXXFLAGS ?= -std=c++14 -O2 -g -Wall -Wextra -Werror -pedantic
 DEPFLAGS := -MMD -MP
 
 BINDIR ?= .
-OBJDIR := obj
+# Objects are built OUTSIDE the checkout, in a build directory beside the four
+# projects: ../build/Converter-C2S/obj. Nothing intermediate is ever written next
+# to the sources, so `tar` on this repository carries source and nothing else,
+# and a clean is a directory removal that cannot reach a tracked file.
+#
+# Overridable, and `?=` on purpose: workspace.mk names one place for all four,
+# and a command line beats both.
+OBJDIR ?= ../build/Converter-C2S/obj
 TARGET := $(BINDIR)/c2s.exe
 
 # src/s/vendor is the Shalimar front end carried over from Compiler-S. It is
