@@ -217,7 +217,7 @@ source has to become one or more `//` lines if comments are carried across at al
 | `char` | `char` — but **isolated from arithmetic**, see 6.3 |
 | `T a[N]`, `T a[N][M]` | `T a[N]` / `T a[N][M]`, declared at the top of the function |
 | `f(a, b)` | `f(a, b)` |
-| `if / else` | `if / elseif / else` — note **`elseif` is one keyword**; `else if` is a parse error |
+| `if / else` | `if / else if / else` — two words, as in C. A one-word `elseif` was the original spelling and was removed on 2026-08-26; it is not even reserved now |
 | `while (c) { }` | `while c { }` |
 | `for (i = A; i <= B; i += K)` | `for i : A to B step K` — **inclusive**, constant stride only |
 | `return e;` | `return e` — expression must stay on the `return`'s line |
@@ -229,7 +229,7 @@ source has to become one or more `//` lines if comments are carried across at al
 
 | C89 | Rewrite | Note |
 | --- | --- | --- |
-| `switch` | `if` / `elseif` / `else`, or an entry index and a done flag where a case falls through | see §8; both shapes are automatic, neither is asked for |
+| `switch` | `if` / `else if` / `else`, or an entry index and a done flag where a case falls through | see §8; both shapes are automatic, neither is asked for |
 | `do { } while (c);` | peeled first iteration, or a flag + `while` | doubles the body or adds a variable |
 | `a ? b : c` | an `if`/`else` writing a temporary declared at the top of the function | ternary in an argument position needs statement lifting |
 | `x++`, `x += e` | `x +: 1`, `x +: e` | Shalimar has **only** `+:` and `-:`; `*=`, `/=`, `%=` become `x : x * e` |
@@ -294,8 +294,8 @@ works.
 - `?:` is lowered wherever **a statement can be expanded around it**: as the
   whole right side of an assignment, into an `if`/`else` writing the target in
   each arm, and as the whole of a `return`, into one that returns in each arm.
-  A chain flattens into `elseif` rather than nesting, because `elseif` is one
-  keyword in Shalimar and an `if` inside an `else` is not grammatical. Only
+  A chain flattens into `else if` rather than nesting, which is what C does
+  too, so the two read alike branch for branch. Only
   where the conditional is *part* of a larger expression — an operand, a call
   argument — is there nowhere to put the branch, and there it is refused.
   (`tests/cases/c2s/ternary.c` and `tests/cases/c2s/returns.c`.)
@@ -397,7 +397,7 @@ re-parenthesised from Shalimar's precedence tiers (`|` < `&` < comparisons < `+ 
 
 ---
 
-## 8. `switch` → `if` / `elseif` / `else`: two catches
+## 8. `switch` → `if` / `else if` / `else`: two catches
 
 You approved the lowering, and it is the right one. Two things it does not cover:
 

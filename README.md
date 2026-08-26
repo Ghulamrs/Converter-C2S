@@ -69,7 +69,7 @@ preprocessor and twenty builtins. So:
 - **C89 → Shalimar is mostly a rejection problem.** Most of C has no target.
   The work is deciding precisely what cannot be said, saying where, and
   lowering the handful of things that can be rewritten — `switch` into
-  `if`/`elseif`/`else`, `do`-`while` into `while`, `?:` into a branch — over
+  `if`/`else if`/`else`, `do`-`while` into `while`, `?:` into a branch — over
   the target of an assignment, or over two returns — block-scoped
   declarations to the top of the function.
 - **Shalimar → C89 is mostly a runtime problem.** Nearly every construct has a

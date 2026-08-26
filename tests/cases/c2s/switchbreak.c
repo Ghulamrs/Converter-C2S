@@ -25,7 +25,7 @@
  *
  * The wrapper is built only for a switch that needs one. Every ordinary
  * case ending in its own break is in cases/c2s/switching.c and still
- * lowers to a plain if/elseif chain with no loop around it.
+ * lowers to a plain if/else-if chain with no loop around it.
  */
 
 #include <stdio.h>

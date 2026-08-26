@@ -2,10 +2,10 @@
  *
  * Lowered, not refused, and without being asked for: unlike the rewrites
  * that sit behind a permission this one changes nothing about what the
- * program means. What it costs is the if/elseif chain's readability, and
+ * program means. What it costs is the if/else-if chain's readability, and
  * only for a switch that actually falls through.
  *
- * The if/elseif chain the ordinary lowering builds cannot say "and then
+ * The if/else-if chain the ordinary lowering builds cannot say "and then
  * the one after": every branch of a Shalimar 'if' is exclusive. So this
  * permission trades the chain for an entry index and a done flag, which
  * can.

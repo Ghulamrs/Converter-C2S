@@ -25,7 +25,7 @@ enum class Tok {
     BracketOpen, BracketClose,
     Comma, Dot,
 
-    If, ElseIf, Else, While, For, To, Step, Fun, Return,
+    If, Else, While, For, To, Step, Fun, Return,
     Break, Continue,
     Int, Real, Char,
 

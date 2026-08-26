@@ -151,7 +151,6 @@ private:
 
         const std::string key = lowercased(raw);
         if (key == "if")       { push(Tok::If);       return true; }
-        if (key == "elseif")   { push(Tok::ElseIf);   return true; }
         if (key == "else")     { push(Tok::Else);     return true; }
         if (key == "while")    { push(Tok::While);    return true; }
         if (key == "for")      { push(Tok::For);      return true; }
@@ -292,7 +291,6 @@ std::string spellingOf(const Token& token) {
     case Tok::Comma:         return ",";
     case Tok::Dot:           return ".";
     case Tok::If:            return "if";
-    case Tok::ElseIf:        return "elseif";
     case Tok::Else:          return "else";
     case Tok::While:         return "while";
     case Tok::For:           return "for";

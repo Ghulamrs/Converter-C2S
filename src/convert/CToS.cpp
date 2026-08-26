@@ -14,8 +14,14 @@ namespace {
 
 bool isShalimarReserved(const std::string &name) {
     static const char *const words[] = {
-        "if", "elseif", "else", "while", "for", "to", "step", "fun", "return",
-        "break", "continue", "int", "real", "char", "prec"
+        // Exactly the words Shalimar reserves, and no more: a name renamed
+        // here for no reason is a name the reader has to reconcile against
+        // its C original. `elseif` is gone from the language and `prec` was
+        // never reserved - it is a directive recognised by position, and a
+        // program may call a variable `prec`. Both were in this list and
+        // neither belonged.
+        "if", "else", "while", "for", "to", "step", "fun", "return",
+        "break", "continue", "int", "real", "char"
     };
     std::string lower;
     for (std::size_t i = 0; i < name.size(); ++i) {
@@ -1492,7 +1498,7 @@ void CToS::lowerSwitch(CSwitch &node) {
     // other rewrites behind permissions this one changes nothing about what
     // the program means - the entry index and the done flag reproduce C's
     // rule exactly, default in the middle included. What it costs is the
-    // if/elseif chain's readability, and only for a switch that falls
+    // if/else-if chain's readability, and only for a switch that falls
     // through; that is a price, not a risk, so it is not asked about.
     if (anyFallsThrough && names.entry.empty()) {
         // The hoist walk decides whether to mint the two temporaries, using

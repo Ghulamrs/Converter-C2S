@@ -1,6 +1,6 @@
 // An if-chain written both ways, to be carried into C both ways.
 //
-// `elseif` and a nested `else { if ... }` are the same tree, and CPrinter now
+// `else if` and a nested `else { if ... }` are the same tree, and CPrinter now
 // writes both as C's own `else if` chain rather than stepping one indent per
 // branch. This case is here for the behaviour; the shape is the reason it was
 // written.
@@ -10,7 +10,7 @@ fun <> = main() {
     if x = 0 {
       ? "zero"
     }
-    elseif x = 1 {
+    else if x = 1 {
       ? "one"
     }
     else {

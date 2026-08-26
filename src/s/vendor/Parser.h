@@ -29,12 +29,11 @@ private:
     const Token &current() const { return peek(0); }
     bool at(Tok kind) const { return current().kind == kind; }
 
-    // `else if` is `elseif`. Two spellings of one branch, not two constructs:
-    // `else` may otherwise only be followed by `{`, so `else` + `if` has no
-    // other meaning to collide with and this cannot make a valid program mean
-    // something new. It only stops one that was rejected from being rejected.
+    // A branch is written `else if`, in two words. There is no `elseif`: not
+    // as a keyword, and not as a reserved name either - the word is an
+    // ordinary identifier and a program may use it for one.
     bool atElseIf() const {
-        return at(Tok::ElseIf) || (at(Tok::Else) && peek(1).kind == Tok::If);
+        return at(Tok::Else) && peek(1).kind == Tok::If;
     }
     bool atOperator(const char *spelling) const;
     const Token &advance();

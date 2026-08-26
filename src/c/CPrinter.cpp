@@ -395,7 +395,7 @@ void CPrinter::visit(CIf &node) {
     // **`else if` on one line, not `else` wrapping a nested `if`.** Both are
     // the same C and the same tree; only one of them is readable. The nested
     // form indents a step per branch, so the five-branch chain that CToS
-    // writes as a flat `elseif` list came back from SToC indented six levels
+    // writes as a flat `else if` list came back from SToC indented six levels
     // and drifting right - the two directions did not describe the same shape
     // even though they meant it.
     //

@@ -4,9 +4,9 @@
  * there are two returns, which says the same thing. Three shapes matter:
  *
  *   - the plain one;
- *   - a chain, which must come out as an 'elseif' ladder - 'elseif' is one
- *     keyword in Shalimar and an 'if' nested inside an 'else' is not
- *     grammatical, so a chain that nested would not compile;
+ *   - a chain, which must come out as an 'else if' ladder rather than nesting
+ *     one 'if' inside the next 'else', so that the Shalimar reads branch for
+ *     branch like the C it came from;
  *   - a conditional in the 'then' arm, which nests, and may.
  *
  * A conditional that is only part of a larger expression is still refused;

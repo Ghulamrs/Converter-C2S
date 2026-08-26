@@ -286,10 +286,10 @@ void SPrinter::visit(shalimar::If &node) {
         // losing its parentheses. Reading a conversion against its source is
         // most of what this tool is for.
         //
-        // This depends on Compiler-S accepting the two-word form, which it did
-        // not before 2026-08-26. Output from here will not compile with an shc
-        // older than that; `elseif` would have been the safe spelling and is
-        // the one to go back to if that ever matters.
+        // There is no alternative spelling to fall back on: Shalimar dropped
+        // the one-word `elseif` on 2026-08-26 and did not keep it reserved, so
+        // this is simply what a branch is called. Output from here needs an
+        // shc of that date or later.
         out_ += i == 0 ? "if " : "else if ";
         expr(*branches[i].condition, TierOr);
         out_ += " {\n";
