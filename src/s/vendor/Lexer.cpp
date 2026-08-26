@@ -157,6 +157,7 @@ private:
         if (key == "to")       { push(Tok::To);       return true; }
         if (key == "step")     { push(Tok::Step);     return true; }
         if (key == "fun")      { push(Tok::Fun);      return true; }
+        if (key == "uses")     { push(Tok::Uses);     return true; }
         if (key == "return")   { push(Tok::Return);   return true; }
         if (key == "break")    { push(Tok::Break);    return true; }
         if (key == "continue") { push(Tok::Continue); return true; }
@@ -297,6 +298,7 @@ std::string spellingOf(const Token& token) {
     case Tok::To:            return "to";
     case Tok::Step:          return "step";
     case Tok::Fun:           return "fun";
+    case Tok::Uses:          return "uses";
     case Tok::Return:        return "return";
     case Tok::Break:         return "break";
     case Tok::Continue:      return "continue";

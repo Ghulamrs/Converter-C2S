@@ -639,6 +639,16 @@ public:
 
     struct Entry { bool isFunction; size_t index; };
 
+    // What this file borrows from the C library. A name and the line that
+    // asked for it, kept in order so a diagnostic can point at the right one.
+    // Per file, per CROSSFILE.md rule 1 - what a file depends on travels with
+    // it - so this belongs to the unit, not to the whole program.
+    struct Borrowed { std::string name; int line; };
+    void borrow(const std::string &name, int line) {
+        borrowed_.push_back(Borrowed{name, line});
+    }
+    const std::vector<Borrowed> &borrowed() const { return borrowed_; }
+
     std::vector<std::unique_ptr<Function>> &functions() { return functions_; }
     const std::vector<std::unique_ptr<Function>> &functions() const { return functions_; }
     std::vector<StmtPtr> &globals() { return globals_; }
@@ -656,6 +666,7 @@ private:
     std::vector<std::unique_ptr<Function>> functions_;
     std::vector<StmtPtr> globals_;
     std::vector<Entry> order_;
+    std::vector<Borrowed> borrowed_;
     int globalSlots_ = 0;
     Function initializer_{Prototype(), Block()};
 };

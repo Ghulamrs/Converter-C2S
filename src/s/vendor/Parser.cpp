@@ -68,6 +68,10 @@ std::unique_ptr<Program> Parser::parse() {
             program->add(std::move(f));
             continue;
         }
+        if (at(Tok::Uses)) {
+            if (!parseUses(*program)) return nullptr;
+            continue;
+        }
         if (atDeclaration()) {
             StmtPtr declaration = parseDeclaration();
             if (failed_ || !declaration) return nullptr;
@@ -79,6 +83,43 @@ std::unique_ptr<Program> Parser::parse() {
         return nullptr;
     }
     return failed_ ? nullptr : std::move(program);
+}
+
+// `uses sin, cos, tan` - what this file borrows from the C library.
+//
+// Global space only, and per file: see docs/FOREIGN.md. The names are taken
+// here and checked later, because whether a name is borrowable is a question
+// about the table rather than about the grammar, and a parser that answered it
+// would have to carry the table.
+//
+// The comma is required between names and forbidden after the last one, which
+// is the same rule the parameter list follows, so that `uses sin,` reads as a
+// mistake rather than as a name that has not been typed yet.
+bool Parser::parseUses(Program &program) {
+    const int line = current().line;
+    advance();
+
+    if (!at(Tok::Identifier)) {
+        fail(line, "'uses' needs the name of a library function");
+        return false;
+    }
+
+    for (;;) {
+        if (!at(Tok::Identifier)) { failUnexpected(); return false; }
+        program.borrow(current().text, current().line);
+        advance();
+        if (!at(Tok::Comma)) break;
+        // The comma's own line, not the next token's. A trailing comma is a
+        // mistake made here, and reporting it where the parser happened to
+        // stop would point at whatever innocent line follows.
+        const int comma = current().line;
+        advance();
+        if (!at(Tok::Identifier)) {
+            fail(comma, "a library function's name must follow the comma");
+            return false;
+        }
+    }
+    return true;
 }
 
 std::unique_ptr<Function> Parser::parseFunction() {
