@@ -43,12 +43,48 @@ double test = 0.0;
 
 There are two programs there and nothing in the file says which is wanted.
 
+**One conditional decides nothing, and is dropped rather than asked about.**
+
+```c
+#ifndef M_PI
+#define M_PI 3.14
+#endif
+```
+
+An `#ifndef NAME` holding nothing but the `#define NAME` it guards is not a
+question: a file being converted has no other translation unit to have defined
+the name first, so the definition always stood. The two lines go, the middle
+one is the substitution it always was, and the Shalimar says in a comment that
+they were dropped. Narrow on purpose — `#ifdef` means the opposite, an `#else`
+is a choice between programs, a name that does not match the one being defined
+is not a guard around it, and anything else at all inside the block makes it a
+question again. Every one of those is in `tests/cases/defines/guardlike.c`.
+
+Refusing this shape stopped conversions over a header idiom that appears in
+almost every file wanting a constant — `M_PI` most of all, which MSVC hides
+behind `_USE_MATH_DEFINES` and everybody therefore defines by hand.
+
 **A `#define` that only names a value is expanded, not reported.** `#define PI
 3.14159` does not branch anything — it names a number, and substituting it is
 what the author meant. Object-like and function-like macros alike are
 substituted into the token stream after lexing, so a diagnostic still quotes
 the line as it was written rather than as it expanded. Only a replacement
 using `#` or `##` goes back to the author, having no token-level equivalent.
+
+**`printf` becomes a print list, and `%.Nf` becomes `prec(N)`.** They are the
+same thing said in two languages — a fixed number of decimal places — so
+`printf("five %.5f\n", v)` is `? "five" prec(5) v`, and `%f` alone is
+`prec(6)`, C's default. A precision on anything else is refused: `%.3d` is
+zero-padding and `%.3s` is a truncation, and neither is what `prec` means.
+
+**And `?` writes a space after every item, which some formats cannot survive.**
+The language has no way to suppress it, so `printf("value %d.\n", n)` has no
+spelling: `? "value" n "."` writes `value 5 . ` where the C wrote `value 5.`.
+That is refused with a marker rather than converted — it printed differently
+and said nothing until 2026-08-27, and the differential suite had no case with
+punctuation against a hole to catch it. A space in the format is what pays for
+the one `?` adds, which is why `"max %d min %d"` converts and `"%d%d"` does
+not.
 
 **A construct with no expression in the target language is a conversion
 error**, with the line, the column, the source quoted back and what to write

@@ -26,6 +26,16 @@ public:
         std::size_t offset = 0;
     };
 
+    // An `#ifndef NAME` whose block holds nothing but the `#define NAME` it
+    // guards, closed by a plain `#endif`. Dropped rather than asked about -
+    // see CPreScan.cpp for why that one shape is safe when no conditional is.
+    struct Guard {
+        std::string name;
+        int openLine = 0;
+        int defineLine = 0;
+        int closeLine = 0;
+    };
+
     bool run(const Source &source, Diagnostics &diagnostics);
 
     const std::string &text() const { return text_; }
@@ -36,11 +46,14 @@ public:
 
     const std::vector<std::string> &pending() const { return pending_; }
 
+    const std::vector<Guard> &guards() const { return guards_; }
+
 private:
     std::string text_;
     std::vector<Include> includes_;
     std::vector<Macro> macros_;
     std::vector<std::string> pending_;
+    std::vector<Guard> guards_;
 };
 
 }

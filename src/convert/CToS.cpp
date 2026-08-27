@@ -12,6 +12,11 @@ namespace c2s {
 
 namespace {
 
+// As far as a double's decimal places go, and as far as this converter takes
+// `prec`. C will pad `%.30f` with digits that mean nothing; Shalimar is not
+// asked to.
+const int kPrecisionLimit = 17;
+
 bool isShalimarReserved(const std::string &name) {
     static const char *const words[] = {
         // Exactly the words Shalimar reserves, and no more: a name renamed
@@ -1777,6 +1782,10 @@ void CToS::lowerPrintf(CCall &call) {
     block_ = &prints;
     std::unique_ptr<shalimar::Print> print(new shalimar::Print(false, line));
     bool printHasItems = false;
+    // Whether the space `?` writes after an item has been accounted for by a
+    // space in the format. Without this, "max %d min %d" reads as text
+    // running straight on from a hole, which it does not.
+    bool spaceTaken = false;
     std::string pending;
 
     struct Flush {
@@ -1802,6 +1811,7 @@ void CToS::lowerPrintf(CCall &call) {
             block_->push_back(shalimar::StmtPtr(done.release()));
             print.reset(new shalimar::Print(false, line));
             printHasItems = false;
+            spaceTaken = false;
             continue;
         }
         if (c != '%') {
@@ -1813,7 +1823,28 @@ void CToS::lowerPrintf(CCall &call) {
                 return;
             }
 
-            if (c == ' ' && pending.empty() && printHasItems) continue;
+            if (c == ' ' && pending.empty() && printHasItems && !spaceTaken) {
+                spaceTaken = true;
+                continue;
+            }
+
+            // **`?` prints every item followed by a single space** - the
+            // language says so, and there is no directive to suppress it. So
+            // a format whose text runs straight on from a hole, `"a %d;"`,
+            // cannot be spelled: `? "a" n ";"` writes `a 5 ; ` where the C
+            // wrote `a 5;`. That converted silently and printed differently
+            // until 2026-08-27, which is the one thing a converter must not
+            // do; the suite compares output byte for byte and had no case
+            // with punctuation against a hole.
+            if (pending.empty() && printHasItems && !spaceTaken) {
+                block_ = outerBlock;
+                markBeyond(call.offset(),
+                           "text with no space before it after a format hole - "
+                           "'?' writes a space after every item and has no way "
+                           "not to");
+                return;
+            }
+
             pending += c;
             continue;
         }
@@ -1823,6 +1854,23 @@ void CToS::lowerPrintf(CCall &call) {
             block_ = outerBlock;
             markBeyond(call.offset(), "a format ending in '%'");
             return;
+        }
+
+        // **`%.5f` is `prec(5)`, and exactly that.** C's precision for an 'f'
+        // and Shalimar's `prec` are the same thing said twice - a fixed number
+        // of decimal places - so this carries across without a difference to
+        // measure. Only the precision: a width or a flag (`%8.2f`, `%-5d`)
+        // has no expression here and is still refused.
+        int precision = 6;
+        bool precisionGiven = false;
+        if (i < text.size() && text[i] == '.') {
+            ++i;
+            precisionGiven = true;
+            precision = 0;
+            while (i < text.size() && std::isdigit(static_cast<unsigned char>(text[i])) != 0) {
+                if (precision <= kPrecisionLimit) precision = precision * 10 + (text[i] - '0');
+                ++i;
+            }
         }
 
         while (permissions_.narrowing() && i < text.size() &&
@@ -1852,9 +1900,26 @@ void CToS::lowerPrintf(CCall &call) {
         shalimar::ExprPtr item = expression(*args[nextArg]);
 
         if (spec == 'f') {
+            if (precision > kPrecisionLimit) {
+                block_ = outerBlock;
+                markBeyond(call.offset(),
+                           "a precision past 17 places, which is further than a "
+                           "double carries and further than 'prec' is asked to go");
+                return;
+            }
 
-            print->add(shalimar::ExprPtr(new shalimar::Precision(sInt(6))));
+            print->add(shalimar::ExprPtr(new shalimar::Precision(sInt(precision))));
             print->add(std::move(item));
+        } else if (precisionGiven) {
+            // On anything but an 'f' a precision means something else
+            // entirely - `%.3d` is zero-padding, `%.3s` is a truncation - and
+            // neither has a print-list directive to carry it.
+            block_ = outerBlock;
+            markBeyond(call.offset(),
+                       std::string("a precision on '%") + spec + "' - only '%.Nf' "
+                       "carries, being the fixed places 'prec' also means");
+            return;
+
         } else if (spec == 'd' || spec == 'i' || spec == 's' ||
                    (spec == 'u' && permissions_.narrowing())) {
 
@@ -1868,9 +1933,9 @@ void CToS::lowerPrintf(CCall &call) {
             block_ = outerBlock;
 
             markBeyond(call.offset(),
-                       std::string("the '%") + spec + "' format - only plain "
-                       "%d %i %f %s %c carry, and '?' writes a real in fixed "
-                       "notation");
+                       std::string("the '%") + spec + "' format - only "
+                       "%d %i %f %.Nf %s %c carry, and '?' writes a real in "
+                       "fixed notation");
             return;
         }
 
@@ -1902,6 +1967,7 @@ void CToS::lowerPrintf(CCall &call) {
 
         ++nextArg;
         printHasItems = true;
+        spaceTaken = false;
     }
 
     if (nextArg < args.size()) {
