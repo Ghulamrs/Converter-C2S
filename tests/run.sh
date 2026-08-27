@@ -9,6 +9,10 @@
 #   tests/cases/s2c/*.shm    Shalimar -> C89, byte-identical output
 #   tests/cases/c2s/*.c      C89 -> Shalimar, identical after stripping the
 #                            trailing space Shalimar's '?' always writes
+#   tests/cases/spacing/*.c  converted, warned about, and identical once every
+#                            space is removed - the one difference the
+#                            converter makes, `?` writing a space after every
+#                            item where the C format had none
 #   tests/cases/allow/*.c    the same, but converted under the permission in
 #                            the case's .flags file - the rewrites that are
 #                            refused by default because each one compiles
@@ -88,6 +92,34 @@ for f in "$here"/cases/c2s/*.c; do
     "$out/s_$n" 2>&1 | sed 's/ *$//' > "$out/o2"
     sed 's/ *$//' "$out/o1" > "$out/o1s"
     if cmp -s "$out/o1s" "$out/o2"; then pass=$((pass+1)); else fails "$n: outputs differ"; fi
+done
+
+# **The one difference the converter is allowed to make.** `?` writes a space
+# after every item and the language cannot be told not to - there is no
+# concatenation and no number-to-text builtin either, so a line cannot be
+# assembled as a single item instead. A format whose text runs straight on
+# from a value therefore comes out with a space the C did not write:
+# `value 5.` becomes `value 5 .`.
+#
+# These cases prove that this is the *only* difference. Both programs are
+# built and run, and their output is compared with every space removed - not
+# squeezed, because the space is one the C never wrote and squeezing leaves it
+# there. A wrong number, a missing line, a changed word or a lost value all
+# still fail; what is forgiven is where the spaces fall. Each case must also
+# warn: a difference nobody is told about is the thing this suite exists to
+# prevent.
+for f in "$here"/cases/spacing/*.c; do
+    n=$(basename "$f" .c)
+    "$CC1" "$f" -o "$out/c_$n" 2>"$out/e" || { fails "$n: cc1 refused the original"; continue; }
+    "$c2s" "$f" -o "$out/conv_$n.shl" 2>"$out/e" || { fails "$n: c2s refused it: $(head -1 "$out/e")"; continue; }
+    grep -q 'warning' "$out/e" || { fails "$n: converted without warning about the spacing"; continue; }
+    "$SHC" "$out/conv_$n.shl" -o "$out/s_$n" 2>"$out/e" || { fails "$n: shc refused the conversion: $(head -2 "$out/e")"; continue; }
+    "$out/c_$n" > "$out/o1" 2>&1
+    "$out/s_$n" > "$out/o2" 2>&1
+    tr -d ' ' < "$out/o1" > "$out/n1"
+    tr -d ' ' < "$out/o2" > "$out/n2"
+    if cmp -s "$out/n1" "$out/n2"; then pass=$((pass+1));
+    else fails "$n: more than the spacing differs"; fi
 done
 
 # The permission cases. Same differential shape as c2s above - the only

@@ -219,9 +219,7 @@ private:
 
 CToS::CToS(const Source &source, Diagnostics &diagnostics,
            const Permissions &permissions)
-    : source_(source), permissions_(permissions) {
-    (void)diagnostics;
-}
+    : diagnostics_(diagnostics), source_(source), permissions_(permissions) {}
 
 int CToS::lineOf(std::size_t offset) const {
     return source_.locate(offset).line();
@@ -1786,6 +1784,8 @@ void CToS::lowerPrintf(CCall &call) {
     // space in the format. Without this, "max %d min %d" reads as text
     // running straight on from a hole, which it does not.
     bool spaceTaken = false;
+    // Once per printf, not once per character that runs on.
+    bool spacingSaid = false;
     std::string pending;
 
     struct Flush {
@@ -1829,20 +1829,29 @@ void CToS::lowerPrintf(CCall &call) {
             }
 
             // **`?` prints every item followed by a single space** - the
-            // language says so, and there is no directive to suppress it. So
-            // a format whose text runs straight on from a hole, `"a %d;"`,
-            // cannot be spelled: `? "a" n ";"` writes `a 5 ; ` where the C
-            // wrote `a 5;`. That converted silently and printed differently
-            // until 2026-08-27, which is the one thing a converter must not
-            // do; the suite compares output byte for byte and had no case
-            // with punctuation against a hole.
-            if (pending.empty() && printHasItems && !spaceTaken) {
-                block_ = outerBlock;
-                markBeyond(call.offset(),
-                           "text with no space before it after a format hole - "
-                           "'?' writes a space after every item and has no way "
-                           "not to");
-                return;
+            // language says so, there is no directive to suppress it, and
+            // Shalimar has nothing to build text with either: no
+            // concatenation and no number-to-text builtin, so the whole line
+            // cannot be assembled as one item instead. `"value %d."` therefore
+            // has no exact spelling; `? "value" n "."` writes `value 5 . `
+            // where the C wrote `value 5.`.
+            //
+            // It converts anyway, and says so. Refusing it - which is what
+            // this did for the few hours it existed on 2026-08-27 - stops a
+            // conversion over one space in the output, and a program that
+            // prints a space too many is still the program. What must not
+            // happen is the difference going unsaid, which is what happened
+            // before either.
+            if (pending.empty() && printHasItems && !spaceTaken && !spacingSaid) {
+                spacingSaid = true;
+                diagnostics_.report(Severity::Warning, source_,
+                                    source_.locate(call.offset()), "C2010",
+                                    "text runs straight on from a value here, "
+                                    "and '?' writes a space after every item",
+                                    "the C wrote no space there and this "
+                                    "writes one - 'value 5.' becomes "
+                                    "'value 5 .'; nothing in Shalimar can "
+                                    "print two items with nothing between");
             }
 
             pending += c;

@@ -61,6 +61,12 @@ public:
 
 private:
 
+    // Kept, where it used to be taken and dropped: everything this class
+    // cannot express goes into the file as a #BEYOND marker, but a thing it
+    // *can* express with a difference has to be said out loud somewhere, and
+    // that is a diagnostic.
+    Diagnostics &diagnostics_;
+
     struct Info {
         std::string sName;
         const shalimar::Type *type = nullptr;

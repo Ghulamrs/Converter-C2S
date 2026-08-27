@@ -77,14 +77,24 @@ same thing said in two languages — a fixed number of decimal places — so
 `prec(6)`, C's default. A precision on anything else is refused: `%.3d` is
 zero-padding and `%.3s` is a truncation, and neither is what `prec` means.
 
-**And `?` writes a space after every item, which some formats cannot survive.**
-The language has no way to suppress it, so `printf("value %d.\n", n)` has no
-spelling: `? "value" n "."` writes `value 5 . ` where the C wrote `value 5.`.
-That is refused with a marker rather than converted — it printed differently
-and said nothing until 2026-08-27, and the differential suite had no case with
-punctuation against a hole to catch it. A space in the format is what pays for
-the one `?` adds, which is why `"max %d min %d"` converts and `"%d%d"` does
-not.
+**And `?` writes a space after every item, which is the one difference this
+converter makes.** The language has no way to suppress it, and nothing to build
+text with either — no concatenation, no number-to-text builtin — so a line
+cannot be assembled as a single item instead. `printf("value %d.\n", n)` can
+only become `? "value" n "."`, which writes `value 5 .` where the C wrote
+`value 5.`.
+
+It converts and warns, naming the line. Refusing it stops a conversion over one
+space, and a program that prints a space too many is still the program; what
+must not happen is the difference going unsaid, which is what happened until
+2026-08-27 — the suite compares byte for byte and had no case with punctuation
+against a hole. `tests/cases/spacing/` is that case now: both programs are run
+and compared with every space removed, so a wrong number or a lost value still
+fails and only where the spaces fall is forgiven.
+
+A space in the format pays for the one `?` adds, so `"max %d min %d"` and
+`"plain %d and %d"` come out exactly, and only `"%d%d"`, `"(%d)"` and
+`"value %d."` gain one.
 
 **A construct with no expression in the target language is a conversion
 error**, with the line, the column, the source quoted back and what to write
