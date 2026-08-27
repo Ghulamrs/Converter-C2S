@@ -1,6 +1,6 @@
-'p' - int \* has no Shalimar type
-'text' - char \* has no Shalimar type
-'head' - struct node \* has no Shalimar type
-'&' - Shalimar has no pointers
-'\*' - Shalimar has no pointers
-'->value' - Shalimar has no structs
+'p' - no pointer support
+'text' - no pointer support
+'head' - no pointer support
+'&' - no pointer support
+'\*' - no pointer support
+'->value' - no struct or union support
