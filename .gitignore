@@ -8,3 +8,7 @@ tests/out/
 rstudio/c2sr/src/core/
 rstudio/c2sr/src/*.o
 rstudio/c2sr/src/*.so
+
+# Xcode's per-user state, which is not the project
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/
