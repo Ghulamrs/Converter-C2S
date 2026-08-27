@@ -196,8 +196,10 @@ void Checker::check(Function &function) {
     unit_ = function.proto().unit;
     scope_.clear();
     scope_.push();
+    declaredLocals_.clear();
 
     for (const Param &parameter : function.proto().inputs) {
+        refuseBorrowed(parameter.name, function.proto().line);
         Symbol *symbol = function.declare(parameter.name, parameter.type);
         if (parameter.byReference) symbol->makeReference();
         scope_.define(parameter.name, symbol);
@@ -287,6 +289,32 @@ bool Checker::refuseConstant(const std::string &name, const char *what) {
     (void)what;
     diag_.error(unit_, line_, "'" + name + "' is a constant - declare it first "
                               "if you want your own");
+    return true;
+}
+
+// **A borrowed name may not also be a variable** - FOREIGN.md rule 3. `fmod` is an
+// ordinary identifier in every file that does not borrow it; in one that does, the
+// name is spoken for, and `real fmod` beside `fmod(7.5, 2.0)` would be one name
+// meaning two things in one file. That is the hazard the language already named when
+// it refused `pi : 3`.
+//
+// Stricter than a constant, which may be had by declaring it: there is no declaring
+// your way out of a borrow, because the clause has already claimed the name for the
+// file. The message names both lines, since the cure is at one or the other.
+//
+// **This file's own borrows only.** Resolve merges the borrows of any file it pulls
+// a function from, so that the pulled function's calls resolve; those must not take
+// a name away from a variable here. Ast.h's `own` flag is what tells them apart.
+//
+// Every caller reports and CARRIES ON rather than returning, so the name still
+// enters scope and a later mention resolves. Bailing produced "'fmod' is borrowed"
+// followed by "Undefined variable 'fmod'" at a line that is not the mistake.
+bool Checker::refuseBorrowed(const std::string &name, int line) {
+    if (program_ == nullptr) return false;
+    const int asked = program_->borrowedOwnOn(name);
+    if (asked == 0) return false;
+    diag_.error(unit_, line, "'" + name + "' is borrowed on line " + std::to_string(asked) +
+                             " - drop the borrow or use another name");
     return true;
 }
 
@@ -558,9 +586,25 @@ void Checker::visit(Call &node) {
 }
 
 void Checker::visit(Declare &node) {
-    if (scope_.definedHere(node.name()) || (inGlobalScope_ && globals_.count(node.name()))) {
+    refuseBorrowed(node.name(), line_);
+
+    // `lookup` rather than `definedHere` for a local: a declaration may sit inside a
+    // block now, and a declared local lives for the whole call, so one inside an `if`
+    // may not shadow one outside it. `declaredLocals_` answers the other half - two
+    // SIBLING blocks each declaring 't', whose scopes never exist at the same moment
+    // for `scope_` to compare.
+    const bool taken =
+        inGlobalScope_ ? (scope_.definedHere(node.name()) || globals_.count(node.name()) != 0)
+                       : (scope_.lookup(node.name()) != 0 ||
+                          declaredLocals_.count(node.name()) != 0);
+    if (taken) {
         diag_.error(unit_, line_, "Variable '" + node.name() + "' already defined");
-        return;
+        // Reported, and then this carries on and declares the name anyway. Returning
+        // here left the name undefined, so every later mention of it drew a second
+        // "Undefined variable" - one mistake, two messages, and the reader is sent
+        // looking at the wrong line. The app's interpreter reports the redeclaration
+        // alone, and the differential suite caught the difference the moment a case
+        // used the name after declaring it twice.
     }
 
     const Type *type = node.declaredType();
@@ -605,7 +649,11 @@ void Checker::visit(Declare &node) {
 
     Symbol *symbol = declareName(node.name(), type);
     if (!inGlobalScope_) {
+        // Into the innermost level, which is what ends the name's VISIBILITY with its
+        // block - the rule a name made by a first assignment already follows. The
+        // lifetime is a separate question and unchanged: the slot is the frame's.
         scope_.define(node.name(), symbol);
+        declaredLocals_.insert(node.name());
 
         if (globals_.count(node.name())) {
             diag_.warning(unit_, line_, "'" + node.name() + "' hides a global");
@@ -646,6 +694,7 @@ void Checker::visit(Assign &node) {
 
     Var &target = static_cast<Var &>(*node.target());
     if (refuseConstant(target.name(), "assigned")) return;
+    refuseBorrowed(target.name(), line_);
 
     const Symbol *existing = lookup(target.name());
 
@@ -726,6 +775,7 @@ void Checker::visit(MultiAssign &node) {
     }
     for (size_t i = 0; i < node.names().size(); ++i) {
         if (refuseConstant(node.names()[i], "assigned")) return;
+        refuseBorrowed(node.names()[i], line_);
         const Symbol *target = lookup(node.names()[i]);
         if (!target) {
             Symbol *created = declareName(node.names()[i], outputs[i]);
@@ -805,6 +855,7 @@ void Checker::visit(For &node) {
 
     warnIfLoopNeverRuns(node);
     refuseConstant(node.variable(), "used as a loop counter");
+    refuseBorrowed(node.variable(), line_);
 
     const int base = function_->addHiddenSlot();
     for (int i = 1; i < For::HiddenSlotCount; ++i) function_->addHiddenSlot();

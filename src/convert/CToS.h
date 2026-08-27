@@ -81,7 +81,11 @@ private:
     void markBeyond(std::size_t offset, const std::string &reason);
 
     const shalimar::Type *scalarS(const CType &type, bool *lossy) const;
-    std::string rename(const std::string &name);
+    // `asVariable` false for a function name. Shalimar 7.5.1 rule 3 takes a
+    // borrowed name away from a VARIABLE only - a program's own function may
+    // share the name and wins at the call - so renaming a function for a borrow
+    // would be churn the reader has to reconcile against the C original.
+    std::string rename(const std::string &name, bool asVariable = true);
     const Info *lookup(const std::string &name) const;
     void declareLocal(CDeclaration &decl, bool atTop);
     bool isPure(CExpr &node) const;
@@ -167,6 +171,13 @@ private:
 
     std::set<std::string> usedNames_;
     std::set<std::string> knownFunctions_;
+
+    // The library names this file will borrow, collected BEFORE anything is
+    // renamed. Shalimar's `uses` is per FILE while a C local is per function, so
+    // a `sqrt()` call anywhere takes the name from every variable in the output -
+    // and the walk that discovers the call may reach it long after the variable
+    // has been named. See the scan in CToS.cpp.
+    std::set<std::string> willBorrow_;
 
     std::map<std::string, std::string> printFunctions_;
     int printCount_ = 0;

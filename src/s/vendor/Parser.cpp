@@ -201,7 +201,6 @@ std::unique_ptr<Function> Parser::parseFunction() {
 
     if (!parsePrototype(proto)) return nullptr;
 
-    blockDepth_ = 0;
     Block body = parseBlock();
     if (failed_) return nullptr;
 
@@ -211,14 +210,12 @@ std::unique_ptr<Function> Parser::parseFunction() {
 Block Parser::parseBlock() {
     Block body;
     if (!expect(Tok::BraceOpen, "Missing '{' to start block")) return body;
-    ++blockDepth_;
 
     while (index_ < tokens_.size() && !at(Tok::BraceClose)) {
         StmtPtr s = parseStatement();
-        if (failed_) { --blockDepth_; return body; }
+        if (failed_) return body;
         if (s) body.push_back(std::move(s));
     }
-    --blockDepth_;
     if (!expect(Tok::BraceClose, "Missing '}' to close block")) return body;
     return body;
 }
@@ -231,15 +228,15 @@ StmtPtr Parser::parseStatement() {
 
 StmtPtr Parser::parseStatementBody() {
     if (at(Tok::PrintLine) || at(Tok::PrintInline)) return parsePrint();
-    if (atDeclaration()) {
-        if (blockDepth_ > 1) {
-            const std::string name = peek(1).kind == Tok::Identifier ? peek(1).text
-                                                                     : spellingOf(peek(1));
-            fail("'" + name + "': declare it at the top of the function");
-            return nullptr;
-        }
-        return parseDeclaration();
-    }
+    // A declaration goes wherever a statement goes - inside an `if`, inside a loop,
+    // halfway down a function after the work has started. It was refused below the
+    // top of a function body once; the rule went so that a C program keeps its shape
+    // when it is converted rather than having every local hoisted to the top.
+    //
+    // What did NOT go is the lifetime. A declared local is still the whole call's, so
+    // Checker refuses a second declaration of the same name anywhere in the function
+    // and ends the name's visibility with its block. §6 of the specification.
+    if (atDeclaration()) return parseDeclaration();
     if (at(Tok::If))    return parseIf();
     if (at(Tok::While)) return parseWhile();
     if (at(Tok::For))   return parseFor();

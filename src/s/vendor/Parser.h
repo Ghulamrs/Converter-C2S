@@ -72,7 +72,6 @@ private:
 
     int loopDepth_ = 0;
 
-    int blockDepth_ = 0;
 
     bool atDeclaration() const;
     const Type *scalarTypeHere();

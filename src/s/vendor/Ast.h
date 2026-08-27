@@ -648,7 +648,14 @@ public:
     // asked for it, kept in order so a diagnostic can point at the right one.
     // Per file, per CROSSFILE.md rule 1 - what a file depends on travels with
     // it - so this belongs to the unit, not to the whole program.
-    struct Borrowed { std::string name; int line; };
+    // `own` says whether THIS file's own `uses` asked for it, or whether Resolve
+    // brought it in with a function pulled from another file. Both make the name
+    // callable; only the file's own borrow takes the name away from a variable
+    // (FOREIGN.md rule 3), because that rule is per file like the clause is. Without
+    // the distinction, a `uses fmod` in a file you merely call into would refuse
+    // `fmod` as a variable HERE - and the app, which has one file and no merging,
+    // would disagree about which programs are legal.
+    struct Borrowed { std::string name; int line; bool own; };
 
     // A function declared with `uses <real> = f(...)` and defined somewhere
     // else entirely - a library the link is given. Its prototype is the only
@@ -662,8 +669,16 @@ public:
             if (foreign_[i].name == name) return &foreign_[i];
         return nullptr;
     }
-    void borrow(const std::string &name, int line) {
-        borrowed_.push_back(Borrowed{name, line});
+    void borrow(const std::string &name, int line, bool own = true) {
+        borrowed_.push_back(Borrowed{name, line, own});
+    }
+
+    // The line this file's OWN clause asked for it on, or 0 if the name is not
+    // borrowed by this file at all - a merged borrow answers 0 like an absent one.
+    int borrowedOwnOn(const std::string &name) const {
+        for (std::size_t i = 0; i < borrowed_.size(); ++i)
+            if (borrowed_[i].own && borrowed_[i].name == name) return borrowed_[i].line;
+        return 0;
     }
     const std::vector<Borrowed> &borrowed() const { return borrowed_; }
 

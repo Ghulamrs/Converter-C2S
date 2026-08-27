@@ -215,6 +215,48 @@ private:
     std::vector<std::size_t> uses_;
 };
 
+// Which library names this file will borrow, answered BEFORE a single name has
+// been renamed.
+//
+// **Why it has to come first.** Shalimar's `uses` is per FILE; a C local is per
+// function. So `sqrt()` called anywhere in the file takes the name away from
+// every variable in the output - and the converting walk meets a local named
+// `sqrt` in one function long before, or long after, it meets the call in
+// another. Renaming as we go therefore got the answer wrong half the time, and
+// silently: the emitted program was valid C in and invalid Shalimar out, refused
+// by shc with "'sqrt' is borrowed on line 1".
+//
+// It borrows NameScan's traversal rather than writing a second one. Thirty-one
+// visit methods copied is thirty-one chances for the copy to miss a node type
+// the original walks, and the failure would be a call this never saw and a name
+// it therefore left alone.
+class BorrowScan : public NameScan {
+public:
+    BorrowScan() : NameScan(std::string()) {}
+
+    const std::set<std::string> &names() const { return names_; }
+
+    void visit(CCall &n) override {
+        CIdent *callee = dynamic_cast<CIdent *>(&n.callee());
+        if (callee != nullptr) {
+            const std::string &name = callee->name();
+            // `fmod(a, b)` becomes the `%` operator and borrows nothing.
+            // CToS::visit(CCall &) decides that too, and the two must agree: if
+            // this said otherwise it would rename a variable for a borrow the
+            // output never makes.
+            const bool isModulus = name == "fmod" && n.args().size() == 2;
+            if (!isModulus) {
+                const char *builtin = builtinFor(name);
+                if (builtin != nullptr) names_.insert(builtin);
+            }
+        }
+        NameScan::visit(n);
+    }
+
+private:
+    std::set<std::string> names_;
+};
+
 }
 
 CToS::CToS(const Source &source, Diagnostics &diagnostics,
@@ -273,9 +315,14 @@ const shalimar::Type *CToS::scalarS(const CType &type, bool *lossy) const {
     }
 }
 
-std::string CToS::rename(const std::string &name) {
+std::string CToS::rename(const std::string &name, bool asVariable) {
     std::string candidate = name;
-    if (isShalimarReserved(candidate)) candidate += "_v";
+    // A borrowed name is not available to a variable in the file that borrows it,
+    // so a C local named `sqrt` in a file that calls sqrt() has to become
+    // something else. Functions are exempt: a program's own wins at the call.
+    const bool taken = isShalimarReserved(candidate) ||
+                       (asVariable && willBorrow_.count(candidate) != 0);
+    if (taken) candidate += "_v";
     while (usedNames_.count(candidate) != 0) candidate += "_2";
     usedNames_.insert(candidate);
     return candidate;
@@ -2245,7 +2292,7 @@ void CToS::convertFunction(CFunctionDef &fn) {
     shalimar::Prototype proto(
         registered != nullptr ? registered->sName
                               : (currentIsMain_ ? std::string("main")
-                                                : rename(fn.name())),
+                                                : rename(fn.name(), false)),
         lineOf(fn.offset()));
 
     const CType *returns = type.base();
@@ -2479,11 +2526,22 @@ std::unique_ptr<shalimar::Program> CToS::convert(CProgram &program) {
     scopes_.push_back(std::map<std::string, Info>());
 
     std::vector<std::unique_ptr<CFunctionDef>> &functions = program.functions();
+
+    // Before a single name is decided. See BorrowScan.
+    willBorrow_.clear();
+    {
+        BorrowScan scan;
+        for (std::size_t i = 0; i < functions.size(); ++i) {
+            scan.run(functions[i]->body());
+        }
+        willBorrow_ = scan.names();
+    }
+
     for (std::size_t i = 0; i < functions.size(); ++i) {
         knownFunctions_.insert(functions[i]->name());
         Info info;
         info.sName = functions[i]->name() == "main"
-                         ? "main" : rename(functions[i]->name());
+                         ? "main" : rename(functions[i]->name(), false);
         scopes_.back()[functions[i]->name()] = info;
         usedNames_.insert(info.sName);
     }
