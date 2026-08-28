@@ -51,6 +51,18 @@ void writeDiagnostics(std::ostream &out,
     }
 }
 
+// One `output-line: input-line` pair per line of the output, on standard error
+// so that `-o -` stays usable and the converted text is never interleaved with
+// anything else. An output line no construct owns is written with a `-`, which
+// is a thing to see rather than a 0 to interpret.
+void writeLineMap(std::ostream &out, const std::vector<int> &map) {
+    for (std::size_t i = 0; i < map.size(); ++i) {
+        out << (i + 1) << ": ";
+        if (map[i] > 0) out << map[i]; else out << '-';
+        out << '\n';
+    }
+}
+
 bool writeOutput(const std::string &path, const std::string &text) {
     if (path.empty()) {
         std::cout << text;
@@ -109,6 +121,8 @@ int main(int argc, char **argv) {
         }
 
         if (!result.ok) return kRefused;
+
+        if (options.showLineMap()) writeLineMap(std::cerr, result.lineMap);
 
         if (!writeOutput(options.output(), result.output)) {
             std::cerr << "c2s: cannot write '"

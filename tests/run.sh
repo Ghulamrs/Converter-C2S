@@ -31,6 +31,10 @@
 #                            that check had only ever been made of C inputs,
 #                            and the Shalimar-to-C side had the identical
 #                            fault sitting in it unfound.
+#   tests/cases/lines/*.c    converted with --lines, and every pair in the
+#                            case's .expect file checked: the output line
+#                            matching a pattern must be mapped back to the
+#                            line of the C named beside it
 #   tests/cases/defines/*.c  must stop with the preprocessor decision list
 #   the command line          exit statuses and codes, which no case above
 #                            reaches - every one of them hands c2s a good
@@ -267,6 +271,65 @@ for f in "$here"/cases/defines/*.c; do
     if [ $rc -ne 1 ]; then fails "$n: expected exit 1 with the decision list, got $rc"; continue; fi
     if ! grep -q 'preprocessor construct' "$out/e"; then fails "$n: no decision list"; continue; fi
     if [ -s "$out/o" ]; then fails "$n: output was written before the decisions"; continue; fi
+    pass=$((pass+1))
+done
+
+# The line map: which line of the C each line of the Shalimar came from.
+#
+# This is what lets an editor that converts before running say "line 9" and
+# mean line 9 of the file on screen. Nothing else in this suite would notice
+# it going wrong - the map is not in the output, so a program whose every
+# line points at line 1 converts, compiles and runs exactly as well as one
+# whose map is right. It was wrong that way once already: a hoisted
+# initialiser took its position from a statement node the parser never gave
+# an offset to, so every one of them claimed to come from line 1.
+#
+# Each case names the pairs it is for: a pattern that picks one line out of
+# the output, and the line of the C that line has to come from.
+for f in "$here"/cases/lines/*.c; do
+    [ -e "$f" ] || continue
+    n=$(basename "$f" .c)
+
+    # Valid C89 first, on the same principle as beyond/: otherwise a case
+    # could pass by being refused in an interesting way.
+    "$CC1" -c "$f" -o "$out/l_$n.o" 2>"$out/e" ||
+        { fails "lines $n: cc1 refused the case itself: $(head -2 "$out/e")"; continue; }
+
+    "$c2s" --lines "$f" -o "$out/lines_$n.shm" 2>"$out/e" ||
+        { fails "lines $n: refused: $(head -1 "$out/e")"; continue; }
+    # The map shares stderr with the diagnostics, and only the map's lines
+    # begin with a number and a colon.
+    grep '^[0-9][0-9]*: ' "$out/e" > "$out/map_$n"
+    "$SHC" "$out/lines_$n.shm" -o "$out/ls_$n" 2>"$out/e" ||
+        { fails "lines $n: shc refused the conversion: $(head -2 "$out/e")"; continue; }
+
+    # One entry per line written, exactly. A map that stops short points every
+    # line after it somewhere else, and one that runs long is counting text
+    # nobody emitted.
+    emitted=$(wc -l < "$out/lines_$n.shm" | tr -d ' ')
+    mapped=$(wc -l < "$out/map_$n" | tr -d ' ')
+    if [ "$emitted" != "$mapped" ]; then
+        fails "lines $n: $emitted lines written, $mapped mapped"
+        continue
+    fi
+
+    wrong=0
+    while IFS="$(printf '\t')" read -r want want_line; do
+        [ -z "$want" ] && continue
+        at=$(grep -n "$want" "$out/lines_$n.shm" | head -1 | cut -d: -f1)
+        if [ -z "$at" ]; then
+            echo "    $n: nothing in the output matches: $want"
+            wrong=$((wrong+1))
+            continue
+        fi
+        got=$(sed -n "${at}p" "$out/map_$n" | sed 's/^[0-9]*: //')
+        if [ "$got" != "$want_line" ]; then
+            echo "    $n: '$want' is output line $at, mapped to $got, wanted $want_line"
+            wrong=$((wrong+1))
+        fi
+    done < "$here/cases/lines/$n.expect"
+    if [ "$wrong" -ne 0 ]; then fails "lines $n: $wrong line(s) mapped wrong"; continue; fi
+
     pass=$((pass+1))
 done
 

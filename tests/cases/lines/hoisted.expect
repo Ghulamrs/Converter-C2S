@@ -1,0 +1,11 @@
+fun <int> = gcd	7
+int t	10
+while b != 0	9
+t : b	10
+b : a % b	11
+^  return a$	14
+fun <> = main	17
+int x : 84	19
+int y : 36	20
+^  return$	21
+print_1(gcd(x, y))	21
