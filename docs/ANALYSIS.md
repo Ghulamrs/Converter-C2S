@@ -72,12 +72,37 @@ through `Source::locate` while the `Source` is still alive.
 
 **What survives, and helps.** `Function::locals()` keeps every local's
 `{name, type, offset, isParam, staticName, scope}` in declaration order, and
-`Function::blocks()` gives the scope tree. That is exactly what Shalimar needs,
-because Shalimar refuses a declaration below the top of a function body
-(`Check.cpp`: `"'x': declare it at the top of the function"`). And several of the
+`Function::blocks()` gives the scope tree. That scope tree is what Shalimar
+needs, for the reason given in the note below. And several of the
 lowerings are *useful* for this target — `sizeof` and `enum` folding, explicit
 conversion nodes, `++x` already an assignment — because Shalimar has none of those
 features anyway.
+
+> **Correction, 2026-08-27.** The paragraph above used to justify that scope tree
+> by saying Shalimar "refuses a declaration below the top of a function body",
+> citing `Check.cpp: "'x': declare it at the top of the function"`. **Both halves
+> were wrong.** The rule is gone — Compiler-S `51bb98f` removed it, and
+> `SHALIMAR_LANGUAGE.md` §6 now reads "a declaration may appear wherever a
+> statement may", inside an `if`, inside a loop, or partway down a function. And
+> while the rule existed it was a *parse* error raised by `Parser.cpp`'s `fail`
+> at `blockDepth_ > 1`, never a `Check.cpp` diagnostic.
+>
+> **What did not change is the lifetime, and that is the real reason the scope
+> tree is needed.** A declared local still lives for the whole call — one name,
+> one slot, one type — so two consequences follow:
+>
+> - the name is **visible only to the end of its block**; reading it after that
+>   block closes is `Undefined variable 't'`;
+> - **two sibling blocks may not each declare `t`** — the second is
+>   `Check.cpp`: `"Variable 't' already defined"`. A block-scoped language would
+>   make those two distinct variables; this one will not, because one call has
+>   one `t`. A declaration inside a block that a surrounding one already declared
+>   is refused the same way.
+>
+> So `hoistDeclarations` + α-renaming remains **correct and still necessary**:
+> the renaming is what makes C's two sibling `int t`s into `t` and `t_2`, which is
+> the case Shalimar genuinely refuses. Only hoisting-as-*obligation* has lapsed.
+> See the open question in §6.2.
 
 **What hurts.** Re-sugaring `*(a + i*8)` back to `a[i]`, and reconstructing
 `char s[32] : "hello"` from thirty-two stores, are pattern-matching exercises whose
@@ -216,7 +241,7 @@ source has to become one or more `//` lines if comments are carried across at al
 | `int` | `int` (32-bit, but see the overflow note below) |
 | `double`, `float` | `real` (64-bit — `float` silently widens) |
 | `char` | `char` — but **isolated from arithmetic**, see 6.3 |
-| `T a[N]`, `T a[N][M]` | `T a[N]` / `T a[N][M]`, declared at the top of the function |
+| `T a[N]`, `T a[N][M]` | `T a[N]` / `T a[N][M]` — hoisted with every other local (6.2), though the language no longer requires it |
 | `f(a, b)` | `f(a, b)` |
 | `if / else` | `if / else if / else` — two words, as in C. A one-word `elseif` was the original spelling and was removed on 2026-08-26; it is not even reserved now |
 | `while (c) { }` | `while c { }` |
@@ -232,16 +257,37 @@ source has to become one or more `//` lines if comments are carried across at al
 | --- | --- | --- |
 | `switch` | `if` / `else if` / `else`, or an entry index and a done flag where a case falls through | see §8; both shapes are automatic, neither is asked for |
 | `do { } while (c);` | peeled first iteration, or a flag + `while` | doubles the body or adds a variable |
-| `a ? b : c` | an `if`/`else` writing a temporary declared at the top of the function | ternary in an argument position needs statement lifting |
+| `a ? b : c` | an `if`/`else` writing a temporary, hoisted with the other locals | ternary in an argument position needs statement lifting |
 | `x++`, `x += e` | `x +: 1`, `x +: e` | Shalimar has **only** `+:` and `-:`; `*=`, `/=`, `%=` become `x : x * e` |
 | `(double)x`, `(int)x` | `real(x)`, `int(x)` | `int()` **fails outside int range** where C truncates |
 | `'a'`, `'\n'` | `char(97)`, `char(10)` | Shalimar has no character literals |
 | `"a\nb"` | split across two `?` statements | Shalimar has **no string escapes at all** |
 | `0x1F`, `010`, `1U`, `1L`, `1.0f` | decimal, unsuffixed | no hex, no octal, no suffixes |
-| block-scoped locals | hoisted to a top-of-function `Declare`, α-renamed on shadowing | `Function::blocks()` gives the scope tree to do this correctly |
+| block-scoped locals | hoisted to a top-of-function `Declare`, α-renamed on shadowing | the **renaming** is the required half — see the note below |
 | `int a, b, c;` | three declarations | one name per declaration |
 | `#include <math.h>` then `sqrt(x)` | `uses sqrt` at the top of the file, then `sqrt(x)` | the header itself is dropped unread; the borrow is the only thing it leaves behind |
 | `/* … */` | `// …` | |
+
+> **Note added 2026-08-27: hoisting is now a choice, renaming is not.** Both rows
+> above once rested on Shalimar demanding declarations at the top of a function.
+> It no longer does (§6 of `SHALIMAR_LANGUAGE.md`; Compiler-S `51bb98f`) — a
+> declaration goes wherever a statement goes. What it still demands is that a
+> declared local live for the whole call, and so **two sibling blocks may not
+> each declare `t`** (`Check.cpp`: `"Variable 't' already defined"`), nor may an
+> inner block redeclare a name a surrounding one declared. C allows all of that.
+>
+> So the α-renaming is load-bearing and stays. The hoisting is no longer forced,
+> and `Function::blocks()` is what tells the two apart.
+>
+> **Open question, not a scheduled change.** Emitting each declaration *in place*
+> where no name collides would keep the shape of the original C, which is what
+> the Compiler-S change was made for. It is not free: `foldOpeningAssignments`
+> (`CToS.cpp`) exists precisely because hoisting separates a declaration from its
+> initialiser, and an in-place declaration inside a loop body would be re-executed
+> where the hoisted one runs once. Any such change has to keep hoisting for every
+> name that collides, which means the scope walk stays either way. Weigh it
+> against §10's still-unanswered argument for a separate `Normalise` pass before
+> touching a 1,500-line visitor.
 
 ### 6.3 Must raise a conversion error
 
@@ -425,7 +471,8 @@ flag-variable form (Decision 4).
 ## 9. Round-tripping is not identity
 
 C → Shalimar → C will not return your original file, and should not be expected to.
-Declarations are re-ordered to the top of each function, `switch` is gone, types are
+Declarations are re-ordered to the top of each function — the converter's choice
+since 2026-08-27, no longer the language's requirement (§6.2) — `switch` is gone, types are
 narrowed to the three Shalimar scalars, and comments and formatting are the
 converter's. The contract worth committing to is **semantic preservation on the
 translatable subset**, verified by compiling both sides and comparing program output
