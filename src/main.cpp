@@ -19,7 +19,9 @@ namespace {
 // 1.2 is the release in which Shalimar gained `uses`: this converter emits the
 // clause now, because output that calls sqrt and does not say so no longer
 // compiles.
-const char *kVersion = "c2s 1.2";
+// The banner in the family's shape - cc1, cxx1 and shc open the same way -
+// with what this one does where they name their language.
+const char *kVersion = "\xC2\xA9""2026 G. R. Akhtar - C and Shalimar, either way 1.2";
 
 const int kOk = 0;
 const int kRefused = 1;
