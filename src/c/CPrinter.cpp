@@ -370,19 +370,8 @@ void CPrinter::child(CStmt &node) {
     }
 }
 
-// The `if` an `else` arm chains to, or null.
-//
-// Two shapes reach here and both are the same C. `else if (c) ...` parses as
-// an else arm that IS a CIf. `else { if (c) ... }` parses as a compound
-// holding one, and a Shalimar `else` block whose only statement is an `if`
-// lowers to exactly that - which is how SToC kept producing the stepped
-// `else { if ... }` the flat chain above was meant to remove.
-//
-// **Only when the block holds that `if` and nothing else.** A second statement
-// makes the braces load-bearing: `else { if (c) A B }` runs B whatever c is,
-// and `else if (c) A B` does not - it is not even the same parse. A single
-// declaration is the same trap wearing a type. So the count is checked before
-// the kind, and one is the only count that qualifies.
+// The `if` an `else` arm chains to, or null: the arm that IS a CIf, or a compound holding one and nothing else, which is what a Shalimar `else` block lowers to.
+// **Only when the block holds that `if` and nothing else**: `else { if (c) A B }` runs B whatever c is and `else if (c) A B` does not, so the count is checked before the kind (CLAUDE.md, "`else if` is one construct").
 static CIf *chainedIf(CStmt *arm) {
     if (arm == nullptr) return nullptr;
     if (CIf *direct = dynamic_cast<CIf *>(arm)) return direct;
@@ -392,22 +381,9 @@ static CIf *chainedIf(CStmt *arm) {
 }
 
 void CPrinter::visit(CIf &node) {
-    // **`else if` on one line, not `else` wrapping a nested `if`.** Both are
-    // the same C and the same tree; only one of them is readable. The nested
-    // form indents a step per branch, so the five-branch chain that CToS
-    // writes as a flat `else if` list came back from SToC indented six levels
-    // and drifting right - the two directions did not describe the same shape
-    // even though they meant it.
-    //
-    // Written as a loop rather than by recursing, because recursing is what
-    // produced the indentation: the chain is one construct in C's own idiom,
-    // and this walks it as one. It also means a chain of any length costs no
-    // stack here, which the old form did.
-    //
-    // The `else` arm is chained ONLY when it is an `if` and nothing else. An
-    // arm the source wrapped in braces is a CCompound, not a CIf, so it still
-    // gets `else` and its own block - the braces were the author's and are
-    // kept.
+    // **`else if` on one line, not `else` wrapping a nested `if`**: the nested form indents a step per branch, and a five-branch chain came back from SToC six levels deep.
+    // A loop rather than recursion, because recursing is what produced the indentation - the chain is one construct in C's own idiom and is walked as one, at no stack.
+    // The `else` arm is chained ONLY when it is an `if` and nothing else; an arm the source wrapped in braces still gets `else` and its own block.
     indent();
     CIf *current = &node;
     for (;;) {

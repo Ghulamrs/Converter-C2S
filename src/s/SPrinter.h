@@ -16,18 +16,7 @@ public:
 
     std::string printExpr(shalimar::Expr &expr);
 
-    /// The source line each printed line came from, indexed by printed line
-    /// minus one - so `lineMap()[0]` is where the first line of the output was
-    /// written. Valid after `print`, and empty until then.
-    ///
-    /// **The numbers are the input's, not this printer's.** Every statement in
-    /// the tree carries the line of the construct it was built from, and for a
-    /// converted program that is a line of the *C*. So this is what turns a
-    /// complaint about the emitted Shalimar back into a place in the file its
-    /// author is looking at, which is the only file they can act on.
-    ///
-    /// 0 where no statement owns the line: the `uses` clause, the blank line
-    /// between two functions, anything a caller prepended.
+    /// The source line each printed line came from, indexed by printed line minus one; valid after `print`, 0 where no statement owns the line, and the numbers are the input's (CLAUDE.md, "The line map").
     const std::vector<int> &lineMap() const { return map_; }
 
     static std::string spellReal(double value);

@@ -12,19 +12,14 @@ namespace c2s {
 
 namespace {
 
-// As far as a double's decimal places go, and as far as this converter takes
-// `prec`. C will pad `%.30f` with digits that mean nothing; Shalimar is not
-// asked to.
+// As far as a double's decimal places go, and as far as this converter takes `prec`: C pads `%.30f` with digits that mean nothing, and Shalimar is not asked to.
 const int kPrecisionLimit = 17;
 
 bool isShalimarReserved(const std::string &name) {
     static const char *const words[] = {
-        // Exactly the words Shalimar reserves, and no more: a name renamed
-        // here for no reason is a name the reader has to reconcile against
-        // its C original. `elseif` is gone from the language and `prec` was
-        // never reserved - it is a directive recognised by position, and a
-        // program may call a variable `prec`. Both were in this list and
-        // neither belonged.
+        // Exactly the words Shalimar reserves, and no more: a name renamed here for no reason is a name the reader has to reconcile against its C original.
+        // `elseif` is gone from the language and `prec` was never reserved - it is a directive recognised by position, and a program may call a variable `prec`.
+        // Both were in this list and neither belonged.
         "if", "else", "while", "for", "to", "step", "fun", "return",
         "break", "continue", "int", "real", "char"
     };
@@ -38,30 +33,8 @@ bool isShalimarReserved(const std::string &name) {
     return false;
 }
 
-// Which Shalimar library function a C call becomes, or null.
-//
-// **Asked of the vendored table rather than listed here.** A hand-written copy
-// of that table is a copy that drifts, and this one had: it knew fourteen names
-// and Shalimar had twenty, so `hypot`, `round` and `trunc` converted to nothing
-// while being perfectly available. Seven more were added on 2026-08-26 and this
-// would have missed those too.
-//
-// Shalimar borrowed the C names unchanged, so the mapping is identity wherever
-// the table has a row. Three exceptions, and each is a name that means
-// something different on the two sides:
-//
-//   fabs  C spells the real one `fabs`; Shalimar's `abs` covers both.
-//   max   Shalimar's are `a > b ? a : b` and propagate NaN. C's nearest are
-//   min   fmax/fmin, which return the non-NaN operand - a different function,
-//         so a C program calling one must not silently become the other. (C89
-//         has no max or min at all, so cc1 refuses the bare names anyway.)
-//   len   an array's own, never C's.
-// **What to call a type that has no Shalimar form.** Struct syntax says "no
-// struct support" wherever it appears - on a member access, on a declaration -
-// so the reader meets one sentence about structs rather than three. A pointer
-// says pointer. Anything else names itself, because this fires for `long long`
-// and `float` too, and dropping the name there would leave the reader guessing
-// which part of their declaration was refused.
+// **What to call a type that has no Shalimar form.** Struct syntax says "no struct support" wherever it appears, so the reader meets one sentence about structs rather than three; a pointer says pointer.
+// Anything else names itself, because this fires for `long long` and `float` too, and dropping the name there would leave the reader guessing which part of their declaration was refused.
 std::string noSupportFor(const CType *type) {
     if (type == nullptr) return "no support for ?";
     switch (type->kind()) {
@@ -73,6 +46,8 @@ std::string noSupportFor(const CType *type) {
     }
 }
 
+// Which Shalimar library function a C call becomes, or null - **asked of the vendored table rather than listed here**, because a hand-written copy drifted: it knew fourteen names and Shalimar had twenty.
+// Shalimar borrowed the C names unchanged, so the mapping is identity wherever the table has a row; `fabs`, `max`, `min` and `len` are the exceptions (CLAUDE.md, "The library names").
 const char *builtinFor(const std::string &name) {
     if (name == "fabs") return "abs";
     if (name == "max" || name == "min" || name == "len") return nullptr;
@@ -232,21 +207,9 @@ private:
     std::vector<std::size_t> uses_;
 };
 
-// Which library names this file will borrow, answered BEFORE a single name has
-// been renamed.
-//
-// **Why it has to come first.** Shalimar's `uses` is per FILE; a C local is per
-// function. So `sqrt()` called anywhere in the file takes the name away from
-// every variable in the output - and the converting walk meets a local named
-// `sqrt` in one function long before, or long after, it meets the call in
-// another. Renaming as we go therefore got the answer wrong half the time, and
-// silently: the emitted program was valid C in and invalid Shalimar out, refused
-// by shc with "'sqrt' is borrowed on line 1".
-//
-// It borrows NameScan's traversal rather than writing a second one. Thirty-one
-// visit methods copied is thirty-one chances for the copy to miss a node type
-// the original walks, and the failure would be a call this never saw and a name
-// it therefore left alone.
+// Which library names this file will borrow, answered BEFORE a single name has been renamed: `uses` is per FILE and a C local is per function, so a `sqrt()` call anywhere takes the name from every variable.
+// Renaming as we go got that wrong half the time, silently - valid C in, Shalimar refused with "'sqrt' is borrowed on line 1" (CLAUDE.md, "The borrows come first").
+// It borrows NameScan's traversal rather than writing a second one: thirty-one visit methods copied is thirty-one chances to miss a node type, and the failure would be a call this never saw.
 class BorrowScan : public NameScan {
 public:
     BorrowScan() : NameScan(std::string()) {}
@@ -257,10 +220,8 @@ public:
         CIdent *callee = dynamic_cast<CIdent *>(&n.callee());
         if (callee != nullptr) {
             const std::string &name = callee->name();
-            // `fmod(a, b)` becomes the `%` operator and borrows nothing.
-            // CToS::visit(CCall &) decides that too, and the two must agree: if
-            // this said otherwise it would rename a variable for a borrow the
-            // output never makes.
+            // `fmod(a, b)` becomes the `%` operator and borrows nothing. CToS::visit(CCall &) decides that too, and the two must agree:
+            // if this said otherwise it would rename a variable for a borrow the output never makes.
             const bool isModulus = name == "fmod" && n.args().size() == 2;
             if (!isModulus) {
                 const char *builtin = builtinFor(name);
@@ -297,13 +258,8 @@ std::vector<std::string> CToS::sourceLinesAt(std::size_t offset) const {
 void CToS::markBeyond(std::size_t offset, const std::string &reason) {
     ++beyondCount_;
 
-    // **And a diagnostic, with a position.** The marker below goes into the
-    // OUTPUT, which is right for a person reading the converted program - it
-    // sits where the construct stood, with the original line beneath it. But an
-    // editor cannot put a comment in its margin: it needs a line and a column,
-    // and this already has the offset. Without this the only thing reaching a
-    // caller was a count, so the tool could say "1 construct has no expression
-    // in the target language" and not say where.
+    // **And a diagnostic, with a position.** The marker below goes into the OUTPUT, where a person reading the converted program wants it; an editor needs a line and a column instead.
+    // Without this the only thing reaching a caller was a count, so the tool could say "1 construct has no expression in the target language" and not say where.
     diagnostics_.report(Severity::ConversionError, source_, source_.locate(offset),
                         "C2100", reason,
                         "there is no Shalimar form for this - the converted "
@@ -753,12 +709,8 @@ void CToS::visit(CCall &node) {
     std::string sName;
     if (builtin != nullptr) {
         sName = builtin;
-        // Shalimar borrows a library function rather than having it, so the
-        // output has to say what it uses. Recorded here, at the one place a C
-        // call is recognised as one, and printed as a `uses` clause by
-        // SPrinter. Program::borrow keeps no duplicates out, and does not need
-        // to: an unused or repeated borrow is ignored by design, and the
-        // printer folds them into one line.
+        // Shalimar borrows a library function rather than having it, so the output has to say what it uses: recorded here, at the one place a C call is recognised as one, and printed as a `uses` clause by SPrinter.
+        // Program::borrow keeps no duplicates out and does not need to: an unused or repeated borrow is ignored by design, and the printer folds them into one line.
         program_->borrow(sName, lineOf(node.offset()));
     } else if (knownFunctions_.count(name) != 0) {
         const Info *info = lookup(name);
@@ -1004,12 +956,8 @@ void CToS::visit(CDeclStmt &node) {
         if (info.isChar && !isCharValued(*declarator.init->expr())) {
             value = charWrap(std::move(value));
         }
-        // The declarator's position, not the statement's. A CDeclStmt is built
-        // straight from its declaration and never given an offset of its own,
-        // so `node.offset()` is 0 and every hoisted initialiser would claim to
-        // come from line 1. The declarator knows where it was written, and for
-        // `int a = f(), b = g();` split over two lines it is also the more
-        // exact answer of the two.
+        // The declarator's position, not the statement's: a CDeclStmt is never given an offset of its own, so `node.offset()` is 0 and every hoisted initialiser would claim to come from line 1.
+        // The declarator knows where it was written, and for `int a = f(), b = g();` split over two lines it is also the more exact answer of the two.
         block_->push_back(shalimar::StmtPtr(new shalimar::Assign(
             shalimar::ExprPtr(new shalimar::Var(info.sName)), std::move(value),
             lineOf(declarator.offset))));
@@ -1146,13 +1094,8 @@ bool containsLoopJump(CStmt &node, bool continueOnly) {
     return finder.found;
 }
 
-// Does any case of this switch run on into the next? Asked twice, and it has
-// to give the same answer both times: once by the hoist walk, which mints the
-// two temporaries the falling lowering needs and is the only pass that can
-// still reach the top of the function, and once by the lowering itself. The
-// arms are read here exactly as lowerSwitch reads them - grouped labels
-// collapse into one arm, and a case ends itself with break, return or
-// continue.
+// Does any case of this switch run on into the next? Asked twice, and it has to give the same answer both times: by the hoist walk, which mints the two temporaries the falling lowering needs, and by the lowering itself.
+// The arms are read here exactly as lowerSwitch reads them - grouped labels collapse into one arm, and a case ends itself with break, return or continue.
 bool switchFallsThrough(CSwitch &node) {
     CCompound *body = dynamic_cast<CCompound *>(&node.body());
     if (body == nullptr) return false;
@@ -1601,17 +1544,10 @@ void CToS::lowerSwitch(CSwitch &node) {
     shalimar::Block wrapped;
     if (needsWrapper) block_ = &wrapped;
 
-    // A case running on into the next is lowered, not refused. Unlike the
-    // other rewrites behind permissions this one changes nothing about what
-    // the program means - the entry index and the done flag reproduce C's
-    // rule exactly, default in the middle included. What it costs is the
-    // if/else-if chain's readability, and only for a switch that falls
-    // through; that is a price, not a risk, so it is not asked about.
+    // A case running on into the next is lowered, not refused: the entry index and the done flag reproduce C's rule exactly, so it costs readability and not meaning, and is not asked about (CLAUDE.md, "A falling switch").
     if (anyFallsThrough && names.entry.empty()) {
-        // The hoist walk decides whether to mint the two temporaries, using
-        // switchFallsThrough. If it said no and the arms say yes the two have
-        // drifted apart, and the honest answer is a refusal rather than a
-        // reference to a name that was never declared.
+        // The hoist walk decides whether to mint the two temporaries, using switchFallsThrough.
+        // If it said no and the arms say yes the two have drifted apart, and the honest answer is a refusal rather than a reference to a name that was never declared.
         markBeyond(node.offset(),
                    "a switch this converter read two different ways - report it");
         loopDepth_ = outerLoopDepth;
@@ -1862,9 +1798,7 @@ void CToS::lowerPrintf(CCall &call) {
     block_ = &prints;
     std::unique_ptr<shalimar::Print> print(new shalimar::Print(false, line));
     bool printHasItems = false;
-    // Whether the space `?` writes after an item has been accounted for by a
-    // space in the format. Without this, "max %d min %d" reads as text
-    // running straight on from a hole, which it does not.
+    // Whether the space `?` writes after an item is paid for by a space in the format - without this, "max %d min %d" reads as text running straight on from a hole.
     bool spaceTaken = false;
     // Once per printf, not once per character that runs on.
     bool spacingSaid = false;
@@ -1910,20 +1844,9 @@ void CToS::lowerPrintf(CCall &call) {
                 continue;
             }
 
-            // **`?` prints every item followed by a single space** - the
-            // language says so, there is no directive to suppress it, and
-            // Shalimar has nothing to build text with either: no
-            // concatenation and no number-to-text builtin, so the whole line
-            // cannot be assembled as one item instead. `"value %d."` therefore
-            // has no exact spelling; `? "value" n "."` writes `value 5 . `
-            // where the C wrote `value 5.`.
-            //
-            // It converts anyway, and says so. Refusing it - which is what
-            // this did for the few hours it existed on 2026-08-27 - stops a
-            // conversion over one space in the output, and a program that
-            // prints a space too many is still the program. What must not
-            // happen is the difference going unsaid, which is what happened
-            // before either.
+            // **`?` prints every item followed by a single space**, with no directive to suppress it and nothing to build text with, so `"value %d."` has no exact spelling (README, "`?` writes a space").
+            // It converts anyway, and says so: refusing it stops a conversion over one space, and a program that prints a space too many is still the program.
+            // What must not happen is the difference going unsaid, which is what happened before either.
             if (pending.empty() && printHasItems && !spaceTaken && !spacingSaid) {
                 spacingSaid = true;
                 diagnostics_.report(Severity::Warning, source_,
@@ -1947,11 +1870,8 @@ void CToS::lowerPrintf(CCall &call) {
             return;
         }
 
-        // **`%.5f` is `prec(5)`, and exactly that.** C's precision for an 'f'
-        // and Shalimar's `prec` are the same thing said twice - a fixed number
-        // of decimal places - so this carries across without a difference to
-        // measure. Only the precision: a width or a flag (`%8.2f`, `%-5d`)
-        // has no expression here and is still refused.
+        // **`%.5f` is `prec(5)`, and exactly that**: C's precision for an 'f' and Shalimar's `prec` are both a fixed number of decimal places, so this carries across without a difference to measure.
+        // Only the precision: a width or a flag (`%8.2f`, `%-5d`) has no expression here and is still refused.
         int precision = 6;
         bool precisionGiven = false;
         if (i < text.size() && text[i] == '.') {
@@ -2345,16 +2265,7 @@ void CToS::convertFunction(CFunctionDef &fn) {
 
     scopes_.push_back(std::map<std::string, Info>());
 
-    // **Local names are minted per function, not per file.** Shalimar scopes a
-    // function's locals to that function, so `x` in two functions is two
-    // variables and neither needs a new name. usedNames_ was one set for the
-    // whole unit, so the second `x` became `x_2`, the third `x_2_2`, and a file
-    // of six small functions ended with `x_2_2_2_2_2` - correct, and unreadable
-    // beside the C it came from.
-    //
-    // Restored rather than cleared: what this set holds on entry is the file
-    // scope - globals and every function's name - which locals must still avoid
-    // and which the next function must still see.
+    // **Local names are minted per function, not per file**, and the file scope this set holds on entry is restored rather than cleared afterwards (CLAUDE.md, "Local names are per function").
     const std::set<std::string> fileScopeNames = usedNames_;
 
     currentFn_ = &fn;
@@ -2440,20 +2351,9 @@ void CToS::convertFunction(CFunctionDef &fn) {
 }
 
 // ---- folding an opening assignment back into its declaration ---------------
-//
-// C says `double r = 0.0;` and Shalimar can say `real r : 0.0`, but the
-// converter said `real r` and then `r : 0.0` on the next line. That is not an
-// oversight: declarations are HOISTED to the top of the function, because C89
-// puts them at the top of a block and Shalimar wants them at the top of a
-// function. Once a declaration moves, its initialiser usually cannot follow -
-// inside a loop or one arm of an `if` it has to run where it was written, not
-// once at entry.
-//
-// So the fold is only safe for an assignment that already runs exactly once,
-// unconditionally, at function entry: one of the leading statements of the
-// function body, before anything branches or repeats.
-//
-// Three conditions, and the third is the one that is easy to miss.
+// C says `double r = 0.0;` and Shalimar can say `real r : 0.0`, but the converter said `real r` and then `r : 0.0`, because declarations are HOISTED to the top of the function and an initialiser usually cannot follow.
+// So the fold is only safe for an assignment that already runs exactly once, unconditionally, at function entry: one of the leading statements of the body, before anything branches or repeats.
+// Three conditions, and the third - the order among the folds - is the one that is easy to miss (CLAUDE.md, "Folding an opening assignment").
 
 // Does this expression read any of `pending`? Used to refuse folding an
 // initialiser that would then run BEFORE the thing it reads was given a value.
@@ -2511,12 +2411,8 @@ void CToS::foldOpeningAssignments(shalimar::Block &body) {
         if (d->initial() == nullptr) pending.insert(d->name());
     }
 
-    // **Folds must keep their order among themselves.** Two initialisers that
-    // both move end up in DECLARATION order, not statement order, so folding
-    // `b : f()` and then `a : g()` would run g() before f() when the program
-    // ran f() first. Only ever folding into a later declaration than the last
-    // one folded keeps the two orders the same. Nothing else in the run
-    // reorders: a declaration with no initialiser does nothing at all.
+    // **Folds must keep their order among themselves.** Two initialisers that both move end up in DECLARATION order, so folding `b : f()` and then `a : g()` would run g() before f() when the program ran f() first.
+    // Only ever folding into a later declaration than the last one folded keeps the two orders the same; a declaration with no initialiser does nothing at all.
     std::size_t lastFolded = 0;
     bool haveFolded = false;
 

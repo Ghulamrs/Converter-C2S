@@ -152,9 +152,7 @@ std::string Diagnostics::summary() const {
                                                "conversion errors"));
     if (warnings_ > 0) parts.push_back(plural(warnings_, "warning", "warnings"));
 
-    // Nothing to count. Notes are not summarised - a run whose only
-    // diagnostic is "a guard was dropped" would otherwise end with the words
-    // "no diagnostics" underneath the note it just wrote.
+    // Nothing to count; notes are not summarised, or a run whose only diagnostic is "a guard was dropped" would end with "no diagnostics" under the note it just wrote.
     if (parts.empty()) return std::string();
 
     std::string out;

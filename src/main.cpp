@@ -12,15 +12,7 @@
 
 namespace {
 
-// 1.2, numbered with the group rather than on its own. c2s is only ever used
-// beside a particular cc1 and shc - it runs both as oracles - so a number that
-// did not move with theirs would say less than nothing.
-//
-// 1.2 is the release in which Shalimar gained `uses`: this converter emits the
-// clause now, because output that calls sqrt and does not say so no longer
-// compiles.
-// The banner in the family's shape - cc1, cxx1 and shc open the same way -
-// with what this one does where they name their language.
+// The family's banner, numbered with the group rather than on its own: c2s runs a particular cc1 and shc as oracles, so its number moves with theirs (CLAUDE.md, "The version number").
 const char *kVersion = "\xC2\xA9""2026 G. R. Akhtar - C and Shalimar, either way 1.2";
 
 const int kOk = 0;
@@ -53,10 +45,8 @@ void writeDiagnostics(std::ostream &out,
     }
 }
 
-// One `output-line: input-line` pair per line of the output, on standard error
-// so that `-o -` stays usable and the converted text is never interleaved with
-// anything else. An output line no construct owns is written with a `-`, which
-// is a thing to see rather than a 0 to interpret.
+// One `output-line: input-line` pair per line of the output, on standard error so that `-o -` stays usable and the converted text is never interleaved with anything else.
+// An output line no construct owns is written with a `-`, which is a thing to see rather than a 0 to interpret.
 void writeLineMap(std::ostream &out, const std::vector<int> &map) {
     for (std::size_t i = 0; i < map.size(); ++i) {
         out << (i + 1) << ": ";

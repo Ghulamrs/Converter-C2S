@@ -61,11 +61,8 @@ void SPrinter::line(const std::string &text) {
     out_ += '\n';
 }
 
-// Attributes everything written since the last call to the line mapLine_ names,
-// one entry per newline. Called at the two edges of a statement rather than
-// wherever a newline is written: the printer emits '\n' in twenty places and a
-// hook at each of them would be twenty chances to miss one, while a statement
-// has exactly two edges and both of them are here.
+// Attributes everything written since the last call to the line mapLine_ names, one entry per newline.
+// Called at the two edges of a statement rather than wherever a newline is written: the printer emits '\n' in twenty places and a hook at each would be twenty chances to miss one.
 void SPrinter::sync() {
     for (; scanned_ < out_.size(); ++scanned_) {
         if (out_[scanned_] == '\n') map_.push_back(mapLine_);
@@ -291,16 +288,8 @@ void SPrinter::visit(shalimar::If &node) {
     std::vector<shalimar::If::Branch> &branches = node.branches();
     for (std::size_t i = 0; i < branches.size(); ++i) {
         indent();
-        // **`else if`, not `elseif`.** Both are the same branch to Shalimar,
-        // and this one makes the converted chain the picture of the C it came
-        // from - same words, same order, same layout, with only the condition
-        // losing its parentheses. Reading a conversion against its source is
-        // most of what this tool is for.
-        //
-        // There is no alternative spelling to fall back on: Shalimar dropped
-        // the one-word `elseif` on 2026-08-26 and did not keep it reserved, so
-        // this is simply what a branch is called. Output from here needs an
-        // shc of that date or later.
+        // **`else if`, not `elseif`**: it makes the converted chain the picture of the C it came from, same words, same order, same layout, with only the condition losing its parentheses.
+        // There is no alternative spelling to fall back on: Shalimar dropped the one-word `elseif` on 2026-08-26 and did not keep it reserved, so output from here needs an shc of that date or later.
         out_ += i == 0 ? "if " : "else if ";
         expr(*branches[i].condition, TierOr);
         out_ += " {\n";
@@ -355,10 +344,8 @@ void SPrinter::visit(shalimar::Continue &) {
 }
 
 void SPrinter::statement(shalimar::Stmt &node) {
-    // Whatever has been written since the last statement - a `while ... {`
-    // header, the `}` that closed a block, the blank line before a function -
-    // belongs to the construct that wrote it, and mapLine_ still names it. So
-    // it is banked here, before this statement's own line takes over.
+    // Whatever has been written since the last statement - a `while ... {` header, a closing `}`, the blank line before a function - belongs to the construct that wrote it, and mapLine_ still names it.
+    // So it is banked here, before this statement's own line takes over.
     sync();
     const int enclosing = mapLine_;
     mapLine_ = node.line();
@@ -387,12 +374,9 @@ void SPrinter::block(shalimar::Block &body) {
     --depth_;
 }
 
-// A function's body, which is a block plus one piece of punctuation: **a blank
-// line between the declarations and the code**. Shalimar gathers every
-// declaration at the top of a function, so that run can be long, and without
-// the gap the first real statement is just the next line down. Only the
-// leading run counts - a `Declare` further in belongs to whatever it sits
-// among and gets no line of its own.
+// A function's body, which is a block plus one piece of punctuation: **a blank line between the declarations and the code**.
+// Shalimar gathers every declaration at the top of a function, so that run can be long, and without the gap the first real statement is just the next line down.
+// Only the leading run counts - a `Declare` further in belongs to whatever it sits among and gets no line of its own.
 void SPrinter::functionBody(shalimar::Block &body) {
     std::size_t declarations = 0;
     while (declarations < body.size() &&
@@ -433,11 +417,8 @@ void SPrinter::functionHeader(const shalimar::Prototype &proto) {
         out_ += ": ";
         out_ += type != nullptr ? type->scalar()->spelling() : "int";
     }
-    // **The function's `{` goes on its own line**, while `if`, `while` and
-    // `for` keep theirs on the same line as the condition. That mix is not an
-    // oversight - it is how the language is written by hand: the head of a
-    // function is a thing you read on its own, and a control-flow brace reads
-    // as part of the line that opens it.
+    // **The function's `{` goes on its own line**, while `if`, `while` and `for` keep theirs on the same line as the condition.
+    // That mix is how the language is written by hand: the head of a function is a thing you read on its own, and a control-flow brace reads as part of the line that opens it.
     out_ += ")\n";
     indent();
     out_ += "{\n";
@@ -450,14 +431,8 @@ std::string SPrinter::print(shalimar::Program &program) {
     scanned_ = 0;
     mapLine_ = 0;
 
-    // What the converted program borrows, one clause at the top. Shalimar has
-    // no library function until a file asks for it - see
-    // ../Compiler-S/docs/FOREIGN.md - so output that calls `sqrt` and does not
-    // say so does not compile.
-    //
-    // De-duplicated in order of first use, which keeps the line stable: a
-    // program calling sin twice and cos once reads `uses sin, cos` however the
-    // calls are arranged in the file.
+    // What the converted program borrows, one clause at the top: Shalimar has no library function until a file asks for it (../Compiler-S/docs/FOREIGN.md), so output that calls `sqrt` and does not say so does not compile.
+    // De-duplicated in order of first use, which keeps the line stable: a program calling sin twice and cos once reads `uses sin, cos` however the calls are arranged in the file.
     std::vector<std::string> borrowed;
     for (std::size_t i = 0; i < program.borrowed().size(); ++i) {
         const std::string &name = program.borrowed()[i].name;
@@ -474,8 +449,7 @@ std::string SPrinter::print(shalimar::Program &program) {
         }
         out_ += "\n\n";
     }
-    // The clause is nobody's line - it is a summary of the whole file - and it
-    // is banked before any function claims the text above it.
+    // The clause is nobody's line - it is a summary of the whole file - and it is banked before any function claims the text above it.
     sync();
 
     const std::vector<shalimar::Program::Entry> &order = program.order();
