@@ -1,13 +1,13 @@
 ©2026 G. R. Akhtar - C and Shalimar, either way 1.2
 Release seal, version 1.2, sealed 26-09-2026
 Written by tools/seal; check it with `tools/seal check`.
-CRC32  size  file - 48 files, seal 4AF7E520
+CRC32  size  file - 48 files, seal AABCFA58
 ------------------------------------------------------------------
 A1DE4ACD      8655  Makefile
 FEDAFF80      3509  c2s.vcxproj
-7A08358E      9326  src/Converter.cpp
-2E28ABF3      1629  src/Converter.h
-AF4DF338      5075  src/Diagnostics.cpp
+B1F098B6      9304  src/Converter.cpp
+AFDCD05E      1199  src/Converter.h
+7D3B912F      5038  src/Diagnostics.cpp
 9C138430      2341  src/Diagnostics.h
 1DE67733       567  src/Location.h
 79ACAEDD      5136  src/Options.cpp
@@ -18,25 +18,25 @@ BC59BFE4      2159  src/Options.h
 E8997637     20231  src/c/CAst.h
 ACB524B9      9759  src/c/CLexer.cpp
 F0E5EC2A       745  src/c/CLexer.h
-CE433014      9672  src/c/CMacro.cpp
+E3273AB8      9315  src/c/CMacro.cpp
 4BE617FF       347  src/c/CMacro.h
 66022A7A     36261  src/c/CParser.cpp
 1044961C      2351  src/c/CParser.h
-8E83167F     15618  src/c/CPreScan.cpp
+96752AEC     14773  src/c/CPreScan.cpp
 EFB9C883      1429  src/c/CPreScan.h
-3F370DCC     17863  src/c/CPrinter.cpp
+E94A3BCD     16993  src/c/CPrinter.cpp
 46CF61B2      2293  src/c/CPrinter.h
 E28F811B       872  src/c/CToken.h
-07A4CD1E     99838  src/convert/CToS.cpp
-15CCB9B5      6586  src/convert/CToS.h
-DE0CB75B     52688  src/convert/SToC.cpp
+549295C4     96806  src/convert/CToS.cpp
+9A5C2E5A      6360  src/convert/CToS.h
+B8E5B97B     52566  src/convert/SToC.cpp
 289DC7EC      3486  src/convert/SToC.h
-876F5CFD      5135  src/main.cpp
+27A8CCD5      4792  src/main.cpp
 5581075D       636  src/s/SBeyond.h
 A952168C      2466  src/s/SFrontEnd.cpp
 E4F3E0A1       656  src/s/SFrontEnd.h
-4A841977     15507  src/s/SPrinter.cpp
-0AB450BD      3203  src/s/SPrinter.h
+8BCB0FC6     15035  src/s/SPrinter.cpp
+257B7612      2652  src/s/SPrinter.h
 52181FC6      2539  src/s/vendor/Ast.cpp
 231AB79A     20605  src/s/vendor/Ast.h
 A3EC073C      5625  src/s/vendor/Builtin.cpp
