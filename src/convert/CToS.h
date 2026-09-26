@@ -61,10 +61,7 @@ public:
 
 private:
 
-    // Kept, where it used to be taken and dropped: everything this class
-    // cannot express goes into the file as a #BEYOND marker, but a thing it
-    // *can* express with a difference has to be said out loud somewhere, and
-    // that is a diagnostic.
+    // Kept, where it used to be taken and dropped: what this class cannot express goes into the file as a #BEYOND marker, but what it *can* express with a difference has to be said out loud, and that is a diagnostic.
     Diagnostics &diagnostics_;
 
     struct Info {
@@ -81,10 +78,8 @@ private:
     void markBeyond(std::size_t offset, const std::string &reason);
 
     const shalimar::Type *scalarS(const CType &type, bool *lossy) const;
-    // `asVariable` false for a function name. Shalimar 7.5.1 rule 3 takes a
-    // borrowed name away from a VARIABLE only - a program's own function may
-    // share the name and wins at the call - so renaming a function for a borrow
-    // would be churn the reader has to reconcile against the C original.
+    // `asVariable` false for a function name: Shalimar 7.5.1 rule 3 takes a borrowed name away from a VARIABLE only - a program's own function may share the name and wins at the call.
+    // So renaming a function for a borrow would be churn the reader has to reconcile against the C original.
     std::string rename(const std::string &name, bool asVariable = true);
     const Info *lookup(const std::string &name) const;
     void declareLocal(CDeclaration &decl, bool atTop);
@@ -164,19 +159,13 @@ private:
     std::map<std::size_t, Info> hoisted_;
 
     std::map<std::size_t, SwitchTemps> switchTemps_;
-    // Folds `int r` + `r : 0` back into `int r : 0`, but only for the leading
-    // statements of a function, which are the only ones that run exactly once
-    // at entry the way a declaration's initialiser does.
+    // Folds `int r` + `r : 0` back into `int r : 0`, but only for the leading statements of a function, the only ones that run exactly once at entry the way a declaration's initialiser does.
     void foldOpeningAssignments(shalimar::Block &body);
 
     std::set<std::string> usedNames_;
     std::set<std::string> knownFunctions_;
 
-    // The library names this file will borrow, collected BEFORE anything is
-    // renamed. Shalimar's `uses` is per FILE while a C local is per function, so
-    // a `sqrt()` call anywhere takes the name from every variable in the output -
-    // and the walk that discovers the call may reach it long after the variable
-    // has been named. See the scan in CToS.cpp.
+    // The library names this file will borrow, collected BEFORE anything is renamed: `uses` is per FILE and a C local is per function, so a `sqrt()` call anywhere takes the name from every variable (BorrowScan in CToS.cpp).
     std::set<std::string> willBorrow_;
 
     std::map<std::string, std::string> printFunctions_;

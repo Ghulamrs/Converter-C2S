@@ -46,15 +46,8 @@ private:
                 ++i;
                 continue;
             }
-            // `__LINE__` and `__FILE__`: the two macros the preprocessor is
-            // required to supply and the two ../Compiler-C supplies. Nothing
-            // defines them, so they are in no table, and an identifier no
-            // table knows is emitted unchanged - which turned a program that
-            // printed its own line number into one naming a variable that does
-            // not exist. Nothing here said so; shc did, afterwards, about a
-            // file its author never wrote. They are expanded on the token
-            // stream like every other macro, and the replacement keeps the
-            // offset it was written at so a diagnostic still points at it.
+            // `__LINE__` and `__FILE__` are in no table, nothing defining them, and an identifier no table knows is emitted unchanged - a program printing its own line number became one naming a variable that does not exist.
+            // They are expanded on the token stream like every other macro, and the replacement keeps the offset it was written at so a diagnostic still points at it.
             if (token.text == "__LINE__" || token.text == "__FILE__") {
                 CToken made = token;
                 if (token.text == "__LINE__") {
@@ -218,11 +211,8 @@ private:
 bool expandMacros(const std::vector<CPreScan::Macro> &macros,
                   std::vector<CToken> &tokens,
                   const Source &source, Diagnostics &diagnostics) {
-    // No early return for a file with no #define in it. There are two macros
-    // nothing defines and every file may still use - `__LINE__` and
-    // `__FILE__` - and skipping the pass left them standing as identifiers.
-    // The pass over a file that defines nothing copies its tokens once, which
-    // is not a cost worth a wrong answer.
+    // No early return for a file with no #define in it: `__LINE__` and `__FILE__` are used without being defined, and skipping the pass left them standing as identifiers.
+    // The pass over a file that defines nothing copies its tokens once, which is not a cost worth a wrong answer.
 
     std::map<std::string, Ready> table;
     for (std::size_t i = 0; i < macros.size(); ++i) {

@@ -131,10 +131,8 @@ std::string nameAfterDirective(const std::string &line, std::size_t hash) {
     return line.substr(begin, i - begin);
 }
 
-// Nothing but space, or the start of a comment. Used for what follows the
-// name on an `#ifndef`, and for the lines inside the block: a block comment
-// spanning several lines counts as content and the guard is then not
-// recognised, which is the safe way round to be wrong.
+// Nothing but space, or the start of a comment; used for what follows the name on an `#ifndef`, and for the lines inside the block.
+// A block comment spanning several lines counts as content and the guard is then not recognised, which is the safe way round to be wrong.
 bool blankOrComment(const std::string &line, std::size_t from) {
     std::size_t i = from;
     while (i < line.size() && (line[i] == ' ' || line[i] == '\t' || line[i] == '\r')) ++i;
@@ -142,26 +140,9 @@ bool blankOrComment(const std::string &line, std::size_t from) {
     return line[i] == '/' && i + 1 < line.size() && (line[i + 1] == '/' || line[i + 1] == '*');
 }
 
-// **The one conditional that decides nothing.**
-//
-//     #ifndef M_PI
-//     #define M_PI 3.14
-//     #endif
-//
-// Every other `#if` asks which program this is, and the answer is not in the
-// file - which is why they stop the conversion. This shape does not ask: the
-// guard holds nothing but the definition it guards, and a file being converted
-// has no other translation unit to have defined the name first, so the
-// definition always stood. Dropping the two lines and keeping the middle one
-// loses nothing, and refusing it stopped conversions over a header idiom that
-// appears in almost every file that wants a constant.
-//
-// Narrow on purpose. `#ifdef` is not this - it means "only if somebody else
-// defined it", which is a real question. An `#else` or `#elif` is a choice
-// between programs. A name that does not match the one being defined is not a
-// guard around it. Anything else inside the block at all - another directive,
-// a declaration, a nested conditional - and it stops being this shape and
-// goes back to being a question.
+// **The one conditional that decides nothing**: `#ifndef M_PI` / `#define M_PI 3.14` / `#endif`, the guard holding nothing but the definition it guards (README, "One conditional decides nothing").
+// A file being converted has no other translation unit to have defined the name first, so the definition always stood and the two lines can go.
+// Narrow on purpose: `#ifdef` is a real question, an `#else` or `#elif` is a choice between programs, a mismatched name is not a guard, and anything else inside the block makes it a question again.
 std::vector<CPreScan::Guard> findGuards(const Source &source) {
     struct Open {
         int line = 0;
@@ -269,11 +250,7 @@ bool CPreScan::run(const Source &source, Diagnostics &diagnostics) {
         while (i < line.size() && (line[i] == ' ' || line[i] == '\t')) ++i;
         if (i >= line.size() || line[i] != '#') continue;
         const std::string name = directiveName(line, i);
-        // A guard's own `#ifndef` is not a conditional that decides anything,
-        // so the name it names is not "decided by" one: the `#define` under
-        // it is an ordinary substitution and is taken as one. Without this
-        // line the define is still refused - P0103 - and dropping the guard
-        // would have changed nothing at all.
+        // A guard's own `#ifndef` decides nothing, so the `#define` under it is an ordinary substitution; without this line it is still refused (P0103) and dropping the guard would have changed nothing.
         if (guardOpen.count(lineNo) != 0) continue;
 
         if (name == "if" || name == "ifdef" || name == "ifndef" || name == "elif") {
@@ -349,16 +326,9 @@ bool CPreScan::run(const Source &source, Diagnostics &diagnostics) {
         }
     }
 
-    // **A dropped guard is safe only if nothing else could have defined the
-    // name, and a header could.** `#ifndef M_PI / #define M_PI 3.14 / #endif`
-    // beside `#include <math.h>` is the case that proves it: math.h defines
-    // M_PI as the full pi, so the C never takes the 3.14 - and a conversion
-    // that drops the guard does take it, and computes different numbers. The
-    // converter translates nothing from a header and cannot see what one
-    // defines, so it says so rather than pretending either way.
-    //
-    // With no include in the file there is nothing else to have defined it,
-    // and the drop is provable rather than likely.
+    // **A dropped guard is safe only if nothing else could have defined the name, and a header could**: math.h defines M_PI as the full pi, so the C never takes the 3.14 and a conversion that drops the guard does.
+    // The converter cannot see what a header defines, so it says so rather than pretending either way (CLAUDE.md, "A dropped guard beside an include").
+    // With no include in the file there is nothing else to have defined it, and the drop is provable rather than likely.
     for (std::size_t g = 0; g < guards_.size(); ++g) {
         const Guard &guard = guards_[g];
         const Location where(source.name(), guard.openLine, 1);

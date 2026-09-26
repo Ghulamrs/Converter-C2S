@@ -58,10 +58,8 @@ Converter::Result Converter::convert(const std::string &sourceText,
         CToS converter(source, diagnostics, permissions);
         std::unique_ptr<shalimar::Program> converted = converter.convert(*program);
 
-        // What was dropped, said in the file itself and not only on the
-        // console: a reader of the Shalimar has no other way to learn that a
-        // guard stood here. The value is written out wherever the name was
-        // used, because Shalimar has nowhere to put a name outside a function
+        // What was dropped, said in the file itself and not only on the console: a reader of the Shalimar has no other way to learn that a guard stood here.
+        // The value is written out wherever the name was used, because Shalimar has nowhere to put a name outside a function
         // - `M_PI : 3.14` at the top of a file is "must be inside a function".
         std::string text;
         const std::vector<CPreScan::Guard> &guards = prescan.guards();
