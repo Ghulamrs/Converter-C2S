@@ -1,0 +1,2 @@
+{"name": "c2s", "version": "1.2", "banner": "©2026 G. R. Akhtar - C and Shalimar, either way 1.2",
+ "dirs": ["src"], "files": ["Makefile", "c2s.vcxproj"]}
