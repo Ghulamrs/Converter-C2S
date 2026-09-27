@@ -2,6 +2,18 @@
 
 #include "Diagnostics.h"
 
+#include <algorithm>
+#include <fstream>
+#include <vector>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#else
+#include <glob.h>
+#endif
+
 namespace c2s {
 
 namespace {
@@ -9,6 +21,35 @@ namespace {
 bool endsWith(const std::string &text, const std::string &suffix) {
     if (text.size() < suffix.size()) return false;
     return text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+// **A file name with `*` or `?` in it, expanded here**, as cl does: cmd hands the pattern through as
+// written, and a POSIX shell only when it was quoted. The matches come back sorted; a plain name is itself.
+std::vector<std::string> expandPattern(const std::string &arg) {
+    std::vector<std::string> found;
+    if (arg.find_first_of("*?") == std::string::npos || std::ifstream(arg.c_str()).good()) {
+        found.push_back(arg);
+        return found;
+    }
+#ifdef _WIN32
+    const std::size_t slash = arg.find_last_of("/\\");
+    const std::string dir = slash == std::string::npos ? std::string() : arg.substr(0, slash + 1);
+    WIN32_FIND_DATAA entry;
+    HANDLE h = FindFirstFileA(arg.c_str(), &entry);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            if (!(entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) found.push_back(dir + entry.cFileName);
+        } while (FindNextFileA(h, &entry));
+        FindClose(h);
+    }
+    std::sort(found.begin(), found.end());
+#else
+    glob_t g;
+    if (glob(arg.c_str(), 0, nullptr, &g) == 0)
+        for (std::size_t k = 0; k < g.gl_pathc; k++) found.push_back(g.gl_pathv[k]);
+    globfree(&g);
+#endif
+    return found;
 }
 
 }
@@ -104,7 +145,19 @@ bool Options::parse(int argc, char **argv, Diagnostics &diagnostics) {
                                "' was already named");
             return false;
         }
-        input_ = arg;
+        // One file at a time, so a pattern has to name exactly one.
+        const std::vector<std::string> found = arg == "-" ? std::vector<std::string>(1, arg) : expandPattern(arg);
+        if (found.empty()) {
+            diagnostics.report(Severity::SyntaxError, "C0006", "no file matches '" + arg + "'");
+            return false;
+        }
+        if (found.size() > 1) {
+            diagnostics.report(Severity::SyntaxError, "C0003",
+                               "only one input file at a time, and '" + arg + "' matches " +
+                               std::to_string(found.size()) + " files");
+            return false;
+        }
+        input_ = found[0];
     }
 
     if (input_.empty()) {

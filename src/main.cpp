@@ -23,9 +23,10 @@ void listCodes(std::ostream &out) {
     out << "Command line\n"
            "  C0001  unknown option\n"
            "  C0002  an option is missing its argument\n"
-           "  C0003  more than one input file\n"
+           "  C0003  more than one input file, or a pattern matching more than one\n"
            "  C0004  no input file\n"
-           "  C0005  the direction cannot be inferred from the extension\n";
+           "  C0005  the direction cannot be inferred from the extension\n"
+           "  C0006  a pattern with * or ? matches no file\n";
 }
 
 void writeQuestions(std::ostream &out, const std::string &name,
