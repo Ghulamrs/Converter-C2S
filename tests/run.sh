@@ -73,11 +73,10 @@ flagsfor() {
 if [ ! -x "$c2s" ]; then echo "no c2s at $c2s - set C2S="; exit 2; fi
 if [ ! -x "$CC1" ]; then echo "no cc1 oracle at $CC1 - set CC1="; exit 2; fi
 if [ ! -x "$SHC" ]; then echo "no shc oracle at $SHC - set SHC="; exit 2; fi
-echo "c2s $c2s"
-echo "cc1 $CC1"
-echo "shc $SHC"
+if [ "${1:-}" != --one ]; then echo "c2s $c2s"; echo "cc1 $CC1"; echo "shc $SHC"; fi
 
-for f in "$here"/cases/s2c/*.shm; do
+loop_0() {
+for f in "$1"; do
     n=$(basename "$f" .shm)
     "$SHC" "$f" -o "$out/s_$n" 2>"$out/e" || { fails "$n: shc refused the original"; continue; }
     "$c2s" "$f" -o "$out/conv_$n.c" 2>"$out/e" || { fails "$n: markers or refusal: $(head -1 "$out/e")"; continue; }
@@ -86,8 +85,10 @@ for f in "$here"/cases/s2c/*.shm; do
     "$out/c_$n" > "$out/o2" 2>&1
     if cmp -s "$out/o1" "$out/o2"; then pass=$((pass+1)); else fails "$n: outputs differ"; fi
 done
+}
 
-for f in "$here"/cases/c2s/*.c; do
+loop_1() {
+for f in "$1"; do
     n=$(basename "$f" .c)
     "$CC1" "$f" -o "$out/c_$n" 2>"$out/e" || { fails "$n: cc1 refused the original"; continue; }
     "$c2s" "$f" -o "$out/conv_$n.shm" 2>"$out/e" || { fails "$n: markers or refusal: $(head -1 "$out/e")"; continue; }
@@ -97,6 +98,7 @@ for f in "$here"/cases/c2s/*.c; do
     sed 's/ *$//' "$out/o1" > "$out/o1s"
     if cmp -s "$out/o1s" "$out/o2"; then pass=$((pass+1)); else fails "$n: outputs differ"; fi
 done
+}
 
 # **The one difference the converter is allowed to make.** `?` writes a space
 # after every item and the language cannot be told not to - there is no
@@ -112,7 +114,8 @@ done
 # still fail; what is forgiven is where the spaces fall. Each case must also
 # warn: a difference nobody is told about is the thing this suite exists to
 # prevent.
-for f in "$here"/cases/spacing/*.c; do
+loop_2() {
+for f in "$1"; do
     n=$(basename "$f" .c)
     "$CC1" "$f" -o "$out/c_$n" 2>"$out/e" || { fails "$n: cc1 refused the original"; continue; }
     "$c2s" "$f" -o "$out/conv_$n.shl" 2>"$out/e" || { fails "$n: c2s refused it: $(head -1 "$out/e")"; continue; }
@@ -125,11 +128,13 @@ for f in "$here"/cases/spacing/*.c; do
     if cmp -s "$out/n1" "$out/n2"; then pass=$((pass+1));
     else fails "$n: more than the spacing differs"; fi
 done
+}
 
 # The permission cases. Same differential shape as c2s above - the only
 # difference is the flags, and the fact that without them every one of these
 # would be refused rather than wrong.
-for f in "$here"/cases/allow/*.c; do
+loop_3() {
+for f in "$1"; do
     [ -e "$f" ] || continue
     n=$(basename "$f" .c)
     flags=$(flagsfor "$here/cases/allow/$n.flags")
@@ -157,8 +162,10 @@ for f in "$here"/cases/allow/*.c; do
         diff "$out/o1s" "$out/o2" | head -6 | sed 's/^/    /'
     fi
 done
+}
 
-for f in "$here"/cases/beyond/*.c; do
+loop_4() {
+for f in "$1"; do
     n=$(basename "$f" .c)
 
     # A rejection case has to be valid C89 first, or what it proves is that
@@ -210,6 +217,7 @@ for f in "$here"/cases/beyond/*.c; do
 
     pass=$((pass+1))
 done
+}
 
 # Refusals in the other direction. The same three questions beyond/ asks -
 # exit 1, markers present, and every refusal counted also shown - asked of
@@ -221,7 +229,8 @@ done
 # where it stands in the output" over a file with no marker in it. The
 # C-to-Shalimar side had the same fault twice before and grew a check; this
 # side had no case that could have seen it.
-for f in "$here"/cases/s2cbeyond/*.shm; do
+loop_5() {
+for f in "$1"; do
     [ -e "$f" ] || continue
     n=$(basename "$f" .shm)
 
@@ -263,8 +272,10 @@ for f in "$here"/cases/s2cbeyond/*.shm; do
 
     pass=$((pass+1))
 done
+}
 
-for f in "$here"/cases/defines/*.c; do
+loop_6() {
+for f in "$1"; do
     n=$(basename "$f" .c)
     "$c2s" "$f" > "$out/o" 2>"$out/e"
     rc=$?
@@ -273,6 +284,7 @@ for f in "$here"/cases/defines/*.c; do
     if [ -s "$out/o" ]; then fails "$n: output was written before the decisions"; continue; fi
     pass=$((pass+1))
 done
+}
 
 # The line map: which line of the C each line of the Shalimar came from.
 #
@@ -286,7 +298,8 @@ done
 #
 # Each case names the pairs it is for: a pattern that picks one line out of
 # the output, and the line of the C that line has to come from.
-for f in "$here"/cases/lines/*.c; do
+loop_7() {
+for f in "$1"; do
     [ -e "$f" ] || continue
     n=$(basename "$f" .c)
 
@@ -332,6 +345,7 @@ for f in "$here"/cases/lines/*.c; do
 
     pass=$((pass+1))
 done
+}
 
 # The canonical identities, proved against the same oracles.
 #
@@ -342,7 +356,8 @@ done
 # the reprint - two programs behaving identically and printing different
 # text. The identity being checked here is about behaviour, and that is the
 # one shape where the output cannot express it.
-for f in "$here"/cases/s2c/*.shm; do
+loop_8() {
+for f in "$1"; do
     n=$(basename "$f" .shm)
     if [ -f "$here/cases/s2c/$n.nocanon" ]; then continue; fi
     "$c2s" --canon "$f" -o "$out/canon_$n.shm" 2>"$out/e" || { fails "canon $n: refused"; continue; }
@@ -351,6 +366,38 @@ for f in "$here"/cases/s2c/*.shm; do
     "$out/cs_$n" > "$out/o2" 2>&1
     if cmp -s "$out/o1" "$out/o2"; then pass=$((pass+1)); else fails "canon $n: outputs differ"; fi
 done
+}
+
+# A worker: one case of one loop, its output in a directory of its own, its report and verdict beside.
+work="$out/w"
+if [ "${1:-}" = --one ]; then
+    out="$work/$(basename "$3")"; mkdir -p "$out"
+    { loop_$2 "$3"; } > "$work/$(basename "$3").$2.report" 2>&1
+    if [ "$fail" -gt 0 ]; then v=fail; elif [ "$pass" -gt 0 ]; then v=pass; else v=skip; fi
+    echo $v > "$work/$(basename "$3").$2.verdict"
+    exit 0
+fi
+rm -rf "$work"; mkdir -p "$work"
+# Every case of every loop at once, JOBS of them, each worker in a scratch directory of its own
+# keyed by the case file - so `canon`, which runs what `s2c` built for the same file, finds it there
+# and runs in a second phase. The reports come back in the order the loops were written.
+JOBS=${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)}
+items() {  # items <first loop> <last loop>
+    [ 0 -ge "$1" ] && [ 0 -le "$2" ] && for f in "$here"/cases/s2c/*.shm; do [ -e "$f" ] && echo "0 $f"; done
+    [ 1 -ge "$1" ] && [ 1 -le "$2" ] && for f in "$here"/cases/c2s/*.c; do [ -e "$f" ] && echo "1 $f"; done
+    [ 2 -ge "$1" ] && [ 2 -le "$2" ] && for f in "$here"/cases/spacing/*.c; do [ -e "$f" ] && echo "2 $f"; done
+    [ 3 -ge "$1" ] && [ 3 -le "$2" ] && for f in "$here"/cases/allow/*.c; do [ -e "$f" ] && echo "3 $f"; done
+    [ 4 -ge "$1" ] && [ 4 -le "$2" ] && for f in "$here"/cases/beyond/*.c; do [ -e "$f" ] && echo "4 $f"; done
+    [ 5 -ge "$1" ] && [ 5 -le "$2" ] && for f in "$here"/cases/s2cbeyond/*.shm; do [ -e "$f" ] && echo "5 $f"; done
+    [ 6 -ge "$1" ] && [ 6 -le "$2" ] && for f in "$here"/cases/defines/*.c; do [ -e "$f" ] && echo "6 $f"; done
+    [ 7 -ge "$1" ] && [ 7 -le "$2" ] && for f in "$here"/cases/lines/*.c; do [ -e "$f" ] && echo "7 $f"; done
+    [ 8 -ge "$1" ] && [ 8 -le "$2" ] && for f in "$here"/cases/s2c/*.shm; do [ -e "$f" ] && echo "8 $f"; done
+}
+items 0 7 | xargs -P "$JOBS" -n 2 sh "$here/run.sh" --one
+items 8 8 | xargs -P "$JOBS" -n 2 sh "$here/run.sh" --one
+items 0 8 | while read -r k f; do cat "$work/$(basename "$f").$k.report"; done
+pass=$(cat "$work"/*.verdict 2>/dev/null | grep -cx pass || true)
+fail=$(cat "$work"/*.verdict 2>/dev/null | grep -cx fail || true)
 
 echo
 echo "pass=$pass fail=$fail"
