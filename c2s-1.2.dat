@@ -1,10 +1,8 @@
 ©2026 G. R. Akhtar - C and Shalimar, either way 1.2
-Release seal, version 1.2, sealed 27-09-2026
+Release seal, version 1.2, sealed 05-10-2026
 Written by tools/seal; check it with `tools/seal check`.
-CRC32  size  file - 48 files, seal 7419F4D7
+CRC32  size  file - 46 files, seal 35C8D226
 ------------------------------------------------------------------
-A1DE4ACD      8655  Makefile
-FEDAFF80      3509  c2s.vcxproj
 B1F098B6      9304  src/Converter.cpp
 AFDCD05E      1199  src/Converter.h
 7D3B912F      5038  src/Diagnostics.cpp
@@ -52,4 +50,4 @@ BB53E0D4       858  src/s/vendor/Token.h
 4B418463       938  src/s/vendor/Type.cpp
 656D33BD       922  src/s/vendor/Type.h
 ------------------------------------------------------------------
-Sealed on 27-09-2026
+Sealed on 05-10-2026
