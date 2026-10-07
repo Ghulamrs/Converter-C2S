@@ -244,6 +244,48 @@ foreach ($f in Get-ChildItem (Join-Path $here 'cases\s2c\*.shm')) {
     else { Fails "canon ${n}: outputs differ" }
 }
 
+# ---- the record beside a conversion (docs/KEEP.md) -------------------------
+# A -> B -> A in memory by c2s --keep-check, unedited and under five edits of B;
+# then on disk: the copy under .c2s-original is the input byte for byte, and
+# converting back gives the input. The tallies are run.sh's, per direction.
+$keepStat = @{}
+$keepDirs = @('c2s', 'spacing', 'allow', 'beyond', 'lines', 's2c', 's2cbeyond')
+foreach ($d in $keepDirs) {
+    $glob = if ($d -eq 's2c' -or $d -eq 's2cbeyond') { '*.shm' } else { '*.c' }
+    foreach ($f in Get-ChildItem (Join-Path $here "cases\$d\$glob")) {
+        $n = $f.Name
+        $flags = @(FlagsFor ([IO.Path]::ChangeExtension($f.FullName, '.flags')))
+        Run $c2s (@('--keep-check', $f.FullName) + $flags) "$out\k" | Out-Null
+        $lines = (Text "$out\k") -split "`n" | Where-Object { $_ -ne '' }
+        $bad = $false
+        foreach ($l in $lines) {
+            if ($l -notmatch ' ok$' -and $l -notmatch ' skip$') { Write-Host "    keep $d/${n}: $l" }
+            if ($l -match 'FAIL|refused') { $bad = $true }
+            if ($l -match '^keep (\S+) (\S+)') {
+                $dir = if ($d -eq 's2c' -or $d -eq 's2cbeyond') { 'S->C->S' } else { 'C->S->C' }
+                $key = '{0} {1} {2}' -f $dir, $Matches[1], ($Matches[2] -replace ':', '')
+                $keepStat[$key] = 1 + [int]$keepStat[$key]
+            }
+        }
+        if ($bad) { Fails "keep $d/$n" } else { $script:pass++ }
+        $ext = if ($f.Extension -eq '.c') { 'shm' } else { 'c' }
+        Remove-Item -Recurse -Force "$out\.c2s-original" -ErrorAction SilentlyContinue
+        Run $c2s (@($f.FullName, '-o', "$out\kf.$ext") + $flags) "$out\e" | Out-Null
+        $want = [IO.File]::ReadAllBytes($f.FullName)
+        $copy = "$out\.c2s-original\$n"
+        if (-not (Test-Path -LiteralPath $copy) -or
+            -not [Linq.Enumerable]::SequenceEqual($want, [IO.File]::ReadAllBytes($copy))) {
+            Fails "keep $d/${n}: the copy is not the input" }
+        Run $c2s (@("$out\kf.$ext", '-o', "$out\kb_$n") + $flags) "$out\e" | Out-Null
+        if (-not (Test-Path -LiteralPath "$out\kb_$n") -or
+            -not [Linq.Enumerable]::SequenceEqual($want, [IO.File]::ReadAllBytes("$out\kb_$n"))) {
+            Fails "keep $d/${n}: converting back on disk is not the input" }
+    }
+}
+Write-Host ""
+Write-Host "keep round trips, per direction and edit (ok/fail/skip):"
+foreach ($k in ($keepStat.Keys | Sort-Object)) { Write-Host ("  {0} {1}" -f $k, $keepStat[$k]) }
+
 Write-Host ""
 Write-Host ("pass={0} fail={1}" -f $script:pass, $script:fail)
 if ($script:fail -ne 0) { exit 1 }
