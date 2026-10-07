@@ -97,6 +97,24 @@ bool writeRecord(const std::string &output, const std::string &text) {
     return out.good();
 }
 
+std::string baseName(const std::string &file) {
+    const std::size_t slash = file.find_last_of("/\\");
+    return slash == std::string::npos ? file : file.substr(slash + 1);
+}
+
+// Beside the record, a byte-for-byte copy of the original under its own name; a copy of a different original by that name is replaced, and said.
+void writeOriginalCopy(const std::string &output, const std::string &input, const std::string &text) {
+    std::string folder;
+    recordPath(output, &folder);
+    const std::string path = folder + "/" + baseName(input);
+    std::string old;
+    if (readFile(path, old) && old != text) {
+        std::cerr << "c2s: note: " << path << " held a different original, and now holds this one\n";
+    }
+    std::ofstream out(path.c_str(), std::ios::binary);
+    out << text;
+}
+
 int markers(const std::string &text) {
     int n = 0;
     for (std::size_t p = text.find("#BEYOND SHALIMAR"); p != std::string::npos;
@@ -169,6 +187,12 @@ int main(int argc, char **argv) {
                         out = freshResult.output;
                         return freshResult.ok;
                     };
+                    std::string folder, copy;
+                    recordPath(options.input(), &folder);
+                    if (readFile(folder + "/" + side.sourceName, copy) && copy != side.source()) {
+                        std::cerr << "c2s: note: " << folder << "/" << side.sourceName
+                                  << " is no longer the original the record holds; the record is used\n";
+                    }
                     const c2s::Keeper::Restored r = c2s::Keeper::restore(side, source.text(), fresh);
                     if (r.usable) {
                         writeDiagnostics(std::cerr, freshResult.diagnostics);
@@ -179,7 +203,8 @@ int main(int argc, char **argv) {
                         if (!options.output().empty() && options.output() != "-" && !options.noKeep()) {
                             writeRecord(options.output(),
                                         c2s::Sidecar::build(source.text(), r.text, from, to,
-                                                            source.name()).serialise());
+                                                            baseName(source.name())).serialise());
+                            writeOriginalCopy(options.output(), options.input(), source.text());
                         }
                         const int left = markers(r.text);
                         if (left > 0) {
@@ -239,7 +264,8 @@ int main(int argc, char **argv) {
             const bool cToS = options.resolvedDirection() == c2s::Direction::CToShalimar;
             writeRecord(options.output(),
                         c2s::Sidecar::build(source.text(), result.output, cToS ? "c" : "shalimar",
-                                            cToS ? "shalimar" : "c", source.name()).serialise());
+                                            cToS ? "shalimar" : "c", baseName(source.name())).serialise());
+            writeOriginalCopy(options.output(), options.input(), source.text());
         }
 
         if (result.beyondCount > 0) {

@@ -379,6 +379,15 @@ for f in "$1"; do
     sed "s|^|    keep $d/$n: |" "$out/k" | grep -v ' ok$' | grep -v ' skip$'
     if grep -q 'FAIL\|refused' "$out/k"; then fails "keep $d/$n"; else pass=$((pass+1)); fi
     grep '^keep ' "$out/k" | sed "s|^keep |KEEPSTAT $d |"
+    # On disk: the copy under .c2s-original is the input byte for byte, and converting back gives the input.
+    case "$f" in *.c) ext=shm ;; *) ext=c ;; esac
+    rm -rf "$out/.c2s-original"
+    # shellcheck disable=SC2086
+    "$c2s" "$f" -o "$out/kf.$ext" $flags > /dev/null 2>&1
+    if ! cmp -s "$f" "$out/.c2s-original/$n"; then fails "keep $d/$n: the copy is not the input"; fi
+    # shellcheck disable=SC2086
+    "$c2s" "$out/kf.$ext" -o "$out/kb_$n" $flags > /dev/null 2>&1
+    if ! cmp -s "$f" "$out/kb_$n"; then fails "keep $d/$n: converting back on disk is not the input"; fi
 done
 }
 
