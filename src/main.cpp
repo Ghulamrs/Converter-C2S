@@ -1,4 +1,12 @@
 #include <cstdio>
+#ifdef _WIN32
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <direct.h>
+#include <windows.h>
+#else
+#include <sys/stat.h>
+#endif
 #include <fstream>
 #include <iostream>
 #include <ostream>
@@ -7,6 +15,8 @@
 
 #include "Converter.h"
 #include "Diagnostics.h"
+#include "Keep.h"
+#include "KeepCheck.h"
 #include "Options.h"
 #include "Source.h"
 
@@ -56,6 +66,44 @@ void writeLineMap(std::ostream &out, const std::vector<int> &map) {
     }
 }
 
+bool readFile(const std::string &path, std::string &text) {
+    std::ifstream in(path.c_str(), std::ios::binary);
+    if (!in) return false;
+    text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    return true;
+}
+
+// The record of a converted file: `.c2s-original/<its name>` in its own directory.
+std::string recordPath(const std::string &file, std::string *folder = nullptr) {
+    const std::size_t slash = file.find_last_of("/\\");
+    const std::string dir = slash == std::string::npos ? "" : file.substr(0, slash + 1);
+    const std::string base = slash == std::string::npos ? file : file.substr(slash + 1);
+    if (folder) *folder = dir + ".c2s-original";
+    return dir + ".c2s-original/" + base;
+}
+
+bool writeRecord(const std::string &output, const std::string &text) {
+    std::string folder;
+    const std::string path = recordPath(output, &folder);
+#ifdef _WIN32
+    _mkdir(folder.c_str());
+    SetFileAttributesA(folder.c_str(), FILE_ATTRIBUTE_HIDDEN);
+#else
+    mkdir(folder.c_str(), 0777);
+#endif
+    std::ofstream out(path.c_str(), std::ios::binary);
+    out << text;
+    out.close();
+    return out.good();
+}
+
+int markers(const std::string &text) {
+    int n = 0;
+    for (std::size_t p = text.find("#BEYOND SHALIMAR"); p != std::string::npos;
+         p = text.find("#BEYOND SHALIMAR", p + 1)) ++n;
+    return n;
+}
+
 bool writeOutput(const std::string &path, const std::string &text) {
     if (path.empty()) {
         std::cout << text;
@@ -96,12 +144,64 @@ int main(int argc, char **argv) {
     try {
         const c2s::Source source = c2s::Source::fromFile(options.input());
 
-        const c2s::Converter::Result result =
+        const c2s::Direction direction = options.resolvedDirection();
+        const bool toS = direction == c2s::Direction::CToShalimar;
+        if (options.keepCheck()) {
+            return c2s::KeepCheck::run(source.text(), source.name(), direction,
+                                       options.permissions());
+        }
+
+        // A sidecar beside the input from the conversion that made it: unchanged constructs go back as they were.
+        if (!options.canonicalise() && !options.fresh()) {
+            std::string kept;
+            c2s::Sidecar side;
+            if (readFile(recordPath(options.input()), kept)) {
+                const std::string from = toS ? "c" : "shalimar", to = toS ? "shalimar" : "c";
+                if (!c2s::Sidecar::parse(kept, side) || side.from != to || side.to != from) {
+                    std::cerr << "c2s: note: " << recordPath(options.input())
+                              << " is not this file's record, and is ignored\n";
+                } else {
+                    c2s::Converter::Result freshResult;
+                    auto fresh = [&](std::string &out) {
+                        freshResult = c2s::Converter::convert(source.text(), source.name(), direction,
+                                                              options.permissions(),
+                                                              options.emitIncludes());
+                        out = freshResult.output;
+                        return freshResult.ok;
+                    };
+                    const c2s::Keeper::Restored r = c2s::Keeper::restore(side, source.text(), fresh);
+                    if (r.usable) {
+                        writeDiagnostics(std::cerr, freshResult.diagnostics);
+                        if (!writeOutput(options.output(), r.text)) {
+                            std::cerr << "c2s: cannot write '" << options.output() << "'\n";
+                            return kCannotRead;
+                        }
+                        if (!options.output().empty() && options.output() != "-" && !options.noKeep()) {
+                            writeRecord(options.output(),
+                                        c2s::Sidecar::build(source.text(), r.text, from, to,
+                                                            source.name()).serialise());
+                        }
+                        const int left = markers(r.text);
+                        if (left > 0) {
+                            std::cerr << source.name() << ": " << left
+                                      << (left == 1 ? " construct has" : " constructs have")
+                                      << " no expression in the target language, and each is"
+                                         " marked where it stands in the output\n";
+                            return kRefused;
+                        }
+                        return kOk;
+                    }
+                    if (!r.note.empty()) std::cerr << "c2s: note: " << r.note << '\n';
+                }
+            }
+        }
+
+        c2s::Converter::Result result =
             options.canonicalise()
                 ? c2s::Converter::canonicalise(source.text(), source.name(),
                                                options.resolvedDirection())
                 : c2s::Converter::convert(source.text(), source.name(),
-                                          options.resolvedDirection(),
+                                          direction,
                                           options.permissions(),
                                           options.emitIncludes());
 
@@ -117,11 +217,29 @@ int main(int argc, char **argv) {
 
         if (options.showLineMap()) writeLineMap(std::cerr, result.lineMap);
 
+        // No sidecar: a #BEYOND SHALIMAR block at the top level quotes the target language, and goes back as it was.
+        if (!options.canonicalise()) {
+            int restored = 0;
+            result.output = c2s::Keeper::restoreBeyond(source.text(), result.output, restored);
+            if (restored > 0) {
+                std::cerr << "c2s: note: " << restored << " #BEYOND SHALIMAR block"
+                          << (restored == 1 ? "" : "s") << " restored to the original lines\n";
+            }
+        }
+
         if (!writeOutput(options.output(), result.output)) {
             std::cerr << "c2s: cannot write '"
                       << (options.output().empty() ? "-" : options.output())
                       << "'\n";
             return kCannotRead;
+        }
+
+        if (!options.canonicalise() && !options.noKeep() && !options.output().empty() &&
+            options.output() != "-") {
+            const bool cToS = options.resolvedDirection() == c2s::Direction::CToShalimar;
+            writeRecord(options.output(),
+                        c2s::Sidecar::build(source.text(), result.output, cToS ? "c" : "shalimar",
+                                            cToS ? "shalimar" : "c", source.name()).serialise());
         }
 
         if (result.beyondCount > 0) {

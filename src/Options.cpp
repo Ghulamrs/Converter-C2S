@@ -71,6 +71,9 @@ const char *Options::usage() {
         "                       converting nothing\n"
         "  --lines              write, to standard error, which input line each\n"
         "                       output line came from - C to Shalimar only\n"
+        "  --fresh              ignore .c2s-original/<input> and convert all\n"
+        "  --no-keep            write no record in .c2s-original/\n"
+        "  --keep-check         test hook: the round trips of docs/KEEP.md, in memory\n"
         "\n"
         "  Rewrites that are refused by default, because each one compiles\n"
         "  without meaning quite what the original did:\n"
@@ -128,6 +131,9 @@ bool Options::parse(int argc, char **argv, Diagnostics &diagnostics) {
         if (arg == "--no-includes") { emitIncludes_ = false; continue; }
         if (arg == "--canon")        { canonicalise_ = true; continue; }
         if (arg == "--lines")        { showLineMap_ = true; continue; }
+        if (arg == "--fresh")        { fresh_ = true; continue; }
+        if (arg == "--no-keep")      { noKeep_ = true; continue; }
+        if (arg == "--keep-check")   { keepCheck_ = true; continue; }
 
         if (arg == "--allow-short-circuit")   { permissions_.allowShortCircuit(); continue; }
         if (arg == "--allow-char-arithmetic") { permissions_.allowCharArithmetic(); continue; }

@@ -368,6 +368,20 @@ for f in "$1"; do
 done
 }
 
+# The record beside a conversion (docs/KEEP.md): A -> B -> A byte for byte, and five edits of B
+# each changing only what was edited, run in memory by c2s --keep-check over every case.
+loop_9() {
+for f in "$1"; do
+    n=$(basename "$f"); d=$(basename "$(dirname "$f")")
+    flags=$(flagsfor "${f%.*}.flags")
+    # shellcheck disable=SC2086
+    "$c2s" --keep-check "$f" $flags > "$out/k" 2>&1
+    sed "s|^|    keep $d/$n: |" "$out/k" | grep -v ' ok$' | grep -v ' skip$'
+    if grep -q 'FAIL\|refused' "$out/k"; then fails "keep $d/$n"; else pass=$((pass+1)); fi
+    grep '^keep ' "$out/k" | sed "s|^keep |KEEPSTAT $d |"
+done
+}
+
 # A worker: one case of one loop, its output in a directory of its own, its report and verdict beside.
 work="$out/w"
 if [ "${1:-}" = --one ]; then
@@ -392,10 +406,16 @@ items() {  # items <first loop> <last loop>
     [ 6 -ge "$1" ] && [ 6 -le "$2" ] && for f in "$here"/cases/defines/*.c; do [ -e "$f" ] && echo "6 $f"; done
     [ 7 -ge "$1" ] && [ 7 -le "$2" ] && for f in "$here"/cases/lines/*.c; do [ -e "$f" ] && echo "7 $f"; done
     [ 8 -ge "$1" ] && [ 8 -le "$2" ] && for f in "$here"/cases/s2c/*.shm; do [ -e "$f" ] && echo "8 $f"; done
+    [ 9 -ge "$1" ] && [ 9 -le "$2" ] && for f in "$here"/cases/c2s/*.c "$here"/cases/spacing/*.c \
+        "$here"/cases/allow/*.c "$here"/cases/beyond/*.c "$here"/cases/lines/*.c \
+        "$here"/cases/s2c/*.shm "$here"/cases/s2cbeyond/*.shm; do [ -e "$f" ] && echo "9 $f"; done
 }
 items 0 7 | xargs -P "$JOBS" -n 2 sh "$here/run.sh" --one
 items 8 8 | xargs -P "$JOBS" -n 2 sh "$here/run.sh" --one
-items 0 8 | while read -r k f; do cat "$work/$(basename "$f").$k.report"; done
+items 9 9 | xargs -P "$JOBS" -n 2 sh "$here/run.sh" --one
+items 0 9 | while read -r k f; do cat "$work/$(basename "$f").$k.report"; done | grep -v '^KEEPSTAT'
+echo; echo "keep round trips, per direction and edit (ok/fail/skip):"
+cat "$work"/*.9.report 2>/dev/null | grep '^KEEPSTAT' | awk '{dir=($2=="s2c"||$2=="s2cbeyond")?"S->C->S":"C->S->C"; k=dir" "$3; r=$4; sub(":","",r); c[k" "r]++} END {for (x in c) print "  " x, c[x]}' | sort
 pass=$(cat "$work"/*.verdict 2>/dev/null | grep -cx pass || true)
 fail=$(cat "$work"/*.verdict 2>/dev/null | grep -cx fail || true)
 

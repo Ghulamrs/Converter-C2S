@@ -52,6 +52,8 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\Converter.cpp" />
+    <ClCompile Include="src\Keep.cpp" />
+    <ClCompile Include="src\KeepCheck.cpp" />
     <ClCompile Include="src\Diagnostics.cpp" />
     <ClCompile Include="src\Options.cpp" />
     <ClCompile Include="src\Source.cpp" />

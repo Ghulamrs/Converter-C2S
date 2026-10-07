@@ -41,7 +41,7 @@ class Options {
 public:
     Options() : direction_(Direction::Infer), emitIncludes_(true),
                 canonicalise_(false), showLineMap_(false), showHelp_(false),
-                showVersion_(false), listCodes_(false) {}
+                showVersion_(false), listCodes_(false), fresh_(false), noKeep_(false), keepCheck_(false) {}
 
     bool parse(int argc, char **argv, Diagnostics &diagnostics);
 
@@ -60,6 +60,9 @@ public:
     bool showHelp() const { return showHelp_; }
     bool showVersion() const { return showVersion_; }
     bool listCodes() const { return listCodes_; }
+    bool fresh() const { return fresh_; }
+    bool noKeep() const { return noKeep_; }
+    bool keepCheck() const { return keepCheck_; }
 
     Direction resolvedDirection() const;
 
@@ -77,6 +80,9 @@ private:
     bool showHelp_;
     bool showVersion_;
     bool listCodes_;
+    bool fresh_;
+    bool noKeep_;
+    bool keepCheck_;
 };
 
 }
