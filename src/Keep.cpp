@@ -412,7 +412,7 @@ Keeper::Restored Keeper::restore(const Sidecar &sidecar, const std::string &edit
     auto pairs = lcs(withOut, b, [&](std::size_t s, const Chunk &c) {
         return sidecar.segments[s].output == c.text;
     });
-    if (pairs.empty() && !withOut.empty()) {
+    if (pairs.empty() && withOut.size() > 1) {
         r.note = "the sidecar matches nothing in this file, and is ignored";
         return r;
     }
@@ -508,6 +508,21 @@ Keeper::Restored Keeper::restore(const Sidecar &sidecar, const std::string &edit
         for (std::size_t i = 0; i < c.size(); ++i) {
             if (taken[i]) support += c[i].text;
             bool header = c[i].kind == Chunk::Directive || c[i].key.compare(0, 5, "uses:") == 0;
+            if (header && !used[i] && c[i].key.compare(0, 5, "uses:") == 0) {
+                std::set<std::string> have;
+                for (std::size_t q = 0; q < pieces.size(); ++q) {
+                    std::vector<Chunk> pc = Segmenter::split(pieces[q]);
+                    for (std::size_t z = 0; z < pc.size(); ++z)
+                        if (pc[z].key.compare(0, 5, "uses:") == 0) {
+                            std::vector<std::string> ns = Segmenter::identifiers(pc[z].text);
+                            have.insert(ns.begin(), ns.end());
+                        }
+                }
+                bool covered = true;
+                std::vector<std::string> need = Segmenter::identifiers(c[i].text);
+                for (std::size_t z = 0; z < need.size(); ++z) if (!have.count(need[z])) covered = false;
+                if (covered) continue;
+            }
             if (header && !used[i] && assembled.find(trimmed(c[i].text)) == std::string::npos) {
                 bool replaced = false;
                 if (c[i].key.compare(0, 5, "uses:") == 0) {

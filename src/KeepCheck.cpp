@@ -104,6 +104,11 @@ int KeepCheck::run(const std::string &a, const std::string &name, Direction dir,
     auto skip = [&](const std::string &what) { std::cout << "keep " << what << " skip\n"; };
 
     attempt("identity", b, "\x01", "");
+    if (!Converter::convert(b, backName, back, permissions).ok) {
+        for (const char *w : {"constant", "add-statement", "rename-local", "delete-function", "add-function"})
+            std::cout << "keep " << w << " skip: the output does not convert back unedited\n";
+        return failed == 0 ? 0 : 1;
+    }
 
     std::vector<Chunk> bc = Segmenter::split(b);
     long target = -1;
