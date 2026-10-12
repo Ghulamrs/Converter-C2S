@@ -55,8 +55,8 @@ here="$(cd "$(dirname "$0")" && pwd)"
 # which is the good version of the fault, but it is still a suite that could
 # not run being reported as a suite that failed.
 c2s="${C2S:-$here/../c2s.exe}"
-CC1="${CC1:-$here/../../Compiler-C/cc1.exe}"
-SHC="${SHC:-$here/../../Compiler-S/shc.exe}"
+CC1="${CC1:-$here/../../Compiler-Ci/c90.exe}"
+SHC="${SHC:-$here/../../Compiler-Si/shalimar.exe}"
 out="$here/out"
 mkdir -p "$out"
 
