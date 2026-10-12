@@ -10,7 +10,7 @@
  * compiler and its <math.h> declares sinh, cosh, tanh and log10 - those are
  * older than the standard - but NOT hypot, round, trunc, cbrt or log2, which
  * are C99. So a Shalimar program may borrow those five and no C program here
- * can reach them; they are covered by ../../../Compiler-Si/tests/cases/uses_more.shm
+ * can reach them; they are covered by ../../../../Compiler-Si/tests/cases/uses_more.shm
  * instead.
  *
  * fmod is absent on purpose: the converter turns it into Shalimar's `%`, which
