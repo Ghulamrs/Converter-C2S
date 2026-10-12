@@ -4,7 +4,7 @@
 # to are built under. -Werror is not decoration: a converter that emits a
 # language it cannot itself be trusted to compile under is not worth having.
 #
-# -MMD -MP is not optional here either. Compiler-S's CLAUDE.md puts it best:
+# -MMD -MP is not optional here either. Compiler-Si's CLAUDE.md puts it best:
 # without header dependencies a stale object file is a heap corruptor, not a
 # link error.
 
@@ -23,7 +23,7 @@ BINDIR ?= .
 OBJDIR ?= ../build/Converter-C2S/obj
 TARGET := $(BINDIR)/c2s.exe
 
-# src/s/vendor is the Shalimar front end carried over from Compiler-S. It is
+# src/s/vendor is the Shalimar front end carried over from Compiler-Si. It is
 # a copy, not a link - see CLAUDE.md - and it has to be compiled here like
 # everything else, or every shalimar:: symbol goes missing at the link.
 # **Names with a space in them are filtered out, and that is not fussiness.**
@@ -53,24 +53,24 @@ DEPS := $(OBJS:.o=.d)
 # test suite. Nothing here compiles or links their sources - this converter is
 # self-contained, and their repositories are not modified.
 CC1 ?= ../Compiler-C/cc1.exe
-SHC ?= ../Compiler-S/shc.exe
+SHC ?= ../Compiler-Si/shalimar.exe
 
 # Where the two repositories are, as opposed to the two binaries. Only the
 # vendor rules below need this; everything else runs the compilers rather
 # than reading them.
-SHC_DIR ?= ../Compiler-S
+SHC_DIR ?= ../Compiler-Si
 
-# src/s/vendor is a copy of Compiler-S's front end, and a copy is a snapshot.
+# src/s/vendor is a copy of Compiler-Si's front end, and a copy is a snapshot.
 # The C89 side of this converter drifts visibly - the suite runs the real cc1
 # over every case, so a divergence fails something. This side drifts
-# invisibly: a change in Compiler-S's parser leaves the copy stale and
+# invisibly: a change in Compiler-Si's parser leaves the copy stale and
 # nothing here would notice unless a case happened to straddle the
 # difference. Hence a rule to refresh it and a check that says when it needs
 # refreshing.
 #
 # These fourteen are the whole of what the converter uses - the minimum front
 # end docs/ANALYSIS.md section 4 identified by include-graph, plus its
-# headers. Nothing in Compiler-S's backend, Resolve, CodeGen or Target is
+# headers. Nothing in Compiler-Si's backend, Resolve, CodeGen or Target is
 # here, and nothing should be.
 VENDOR := Ast.cpp Ast.h Builtin.cpp Builtin.h Check.cpp Check.h \
           Diag.cpp Diag.h Lexer.cpp Parser.cpp Parser.h Token.h \
@@ -93,7 +93,7 @@ $(OBJDIR)/%.o: src/%.cpp
 test: $(TARGET) vendor-check
 	C2S=$(abspath $(TARGET)) CC1=$(CC1) SHC=$(SHC) ./tests/run.sh
 
-# Re-copy the Shalimar front end from Compiler-S. This is the whole of what
+# Re-copy the Shalimar front end from Compiler-Si. This is the whole of what
 # "upgrade Shalimar and the converter follows" means here: change that
 # repository, run this, run the suite.
 #
@@ -142,7 +142,7 @@ vendor-check:
 	        fi; \
 	    done; \
 	    if [ $$drift -ne 0 ]; then \
-	        echo "vendor: $$drift file(s) have drifted from Compiler-S."; \
+	        echo "vendor: $$drift file(s) have drifted from Compiler-Si."; \
 	        echo "        'make vendor' refreshes them; then rebuild and retest."; \
 	        exit 1; \
 	    fi; \
