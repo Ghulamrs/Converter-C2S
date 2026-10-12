@@ -1,5 +1,5 @@
 ©2026 G. R. Akhtar - C and Shalimar, either way 1.2
-Release seal, version 1.2, sealed 12-10-2026
+Release seal, version 1.2, sealed 13-10-2026
 Written by tools/seal; check it with `tools/seal check`.
 CRC32  size  file - 46 files, seal 4BA1604B
 ------------------------------------------------------------------
@@ -50,4 +50,4 @@ BB53E0D4       858  src/s/vendor/Token.h
 4B418463       938  src/s/vendor/Type.cpp
 656D33BD       922  src/s/vendor/Type.h
 ------------------------------------------------------------------
-Sealed on 12-10-2026
+Sealed on 13-10-2026
