@@ -579,9 +579,7 @@ struct Prototype {
 
     int unit = 0;
 
-    // Declared with `uses`, defined by whatever the link is given. Its name
-    // is NOT mangled: shmf_ marks a function this compiler wrote, and this is
-    // somebody else's, called by the name their C gave it.
+    // Declared with `uses`, defined by whatever the link is given, so its name is NOT mangled: shmf_ marks a function this compiler wrote.
     bool isForeign = false;
 
     bool returnsByPointer() const { return outputs.size() > 1; }
@@ -644,23 +642,12 @@ public:
 
     struct Entry { bool isFunction; size_t index; };
 
-    // What this file borrows from the C library. A name and the line that
-    // asked for it, kept in order so a diagnostic can point at the right one.
-    // Per file, per CROSSFILE.md rule 1 - what a file depends on travels with
-    // it - so this belongs to the unit, not to the whole program.
-    // `own` says whether THIS file's own `uses` asked for it, or whether Resolve
-    // brought it in with a function pulled from another file. Both make the name
-    // callable; only the file's own borrow takes the name away from a variable
-    // (FOREIGN.md rule 3), because that rule is per file like the clause is. Without
-    // the distinction, a `uses fmod` in a file you merely call into would refuse
-    // `fmod` as a variable HERE - and the app, which has one file and no merging,
-    // would disagree about which programs are legal.
+    // What this file borrows from the C library, per file (CROSSFILE.md rule 1); `own` marks THIS file's own `uses`, the only borrow that takes the name from a variable (FOREIGN.md rule 3).
     struct Borrowed { std::string name; int line; bool own; };
 
-    // A function declared with `uses <real> = f(...)` and defined somewhere
-    // else entirely - a library the link is given. Its prototype is the only
-    // thing this compiler will ever know about it, which is why the
-    // declaration carries one and the table form does not.
+    // A function declared with `uses <real> = f(...)` and defined somewhere else entirely - a
+    // library the link is given. Its prototype is the only thing this compiler will ever know
+    // about it, which is why the declaration carries one and the table form does not.
     void declareForeign(Prototype proto) { foreign_.push_back(std::move(proto)); }
     std::vector<Prototype> &foreign() { return foreign_; }
     const std::vector<Prototype> &foreign() const { return foreign_; }

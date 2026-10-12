@@ -85,25 +85,9 @@ void Checker::reportUndefined(const std::string &name) {
 bool Checker::check(Program &program) {
     program_ = &program;
 
-    // What the file said it borrows, checked before anything uses it, so that
-    // a name it cannot have is reported where it was asked for rather than at
-    // the call - which may be pages away, or in another file entirely.
-    //
-    // Borrowing something and never calling it is not an error: it costs
-    // nothing and emits nothing, and a file that borrows a set for the project
-    // it belongs to should not be nagged about the ones it did not reach for.
-    // docs/FOREIGN.md, rule 4.
-    // A foreign declaration must describe something a C function can actually
-    // be. Two outputs cannot: shc returns them through a scratch block whose
-    // address it passes in a register of its own choosing - a convention that
-    // is fine while both ends are code this compiler wrote, and is not written
-    // down anywhere for anybody else to implement. It parses, emits and links,
-    // and would simply be wrong, which is the worst of the four.
-    //
-    // A C function returning two values does it through a pointer parameter,
-    // and Shalimar has no pointer type - so there is no spelling of this that
-    // would work, and refusing is the whole answer rather than a limitation to
-    // be lifted later.
+    // What the file said it borrows, checked before anything uses it, so that a name it cannot
+    // have is reported where it was asked for; borrowing and never calling is not an error (FOREIGN.md rule 4).
+    // A foreign declaration with two outputs is refused: shc returns them by a convention of its own, and C would need a pointer parameter Shalimar cannot spell - CLAUDE.md.
     for (std::size_t i = 0; i < program.foreign().size(); ++i) {
         const Prototype &f = program.foreign()[i];
         if (f.outputs.size() > 1) {
@@ -276,14 +260,9 @@ const Type *Checker::common(const Type *a, const Type *b) const {
 }
 
 bool Checker::refuseConstant(const std::string &name, const char *what) {
-    // A program may have its own pi or e, but it has to say so. Declared -
-    // 'real pi', or a parameter - the name is the program's for that whole
-    // body and the constant is simply not in it. Created by assignment it is
-    // refused, because Shalimar makes a name on first write: 'pi : 3' would
-    // leave '? pi' meaning 3.14159 above the line and 3 below it, one name
-    // with two meanings in one function. That is the hazard
-    // SHALIMAR_LANGUAGE.md named when it made these read-only, and it is the
-    // half worth keeping.
+    // A program may have its own pi or e, but it has to say so: declared, the name is the
+    // program's for that whole body; created by assignment it is refused, because 'pi : 3' would
+    // leave '? pi' meaning 3.14159 above the line and 3 below it - the hazard SHALIMAR_LANGUAGE.md named.
     if (!isConstant(name)) return false;
     if (lookup(name) != nullptr) return false;
     (void)what;
@@ -292,23 +271,9 @@ bool Checker::refuseConstant(const std::string &name, const char *what) {
     return true;
 }
 
-// **A borrowed name may not also be a variable** - FOREIGN.md rule 3. `fmod` is an
-// ordinary identifier in every file that does not borrow it; in one that does, the
-// name is spoken for, and `real fmod` beside `fmod(7.5, 2.0)` would be one name
-// meaning two things in one file. That is the hazard the language already named when
-// it refused `pi : 3`.
-//
-// Stricter than a constant, which may be had by declaring it: there is no declaring
-// your way out of a borrow, because the clause has already claimed the name for the
-// file. The message names both lines, since the cure is at one or the other.
-//
-// **This file's own borrows only.** Resolve merges the borrows of any file it pulls
-// a function from, so that the pulled function's calls resolve; those must not take
-// a name away from a variable here. Ast.h's `own` flag is what tells them apart.
-//
-// Every caller reports and CARRIES ON rather than returning, so the name still
-// enters scope and a later mention resolves. Bailing produced "'fmod' is borrowed"
-// followed by "Undefined variable 'fmod'" at a line that is not the mistake.
+// **A borrowed name may not also be a variable** - FOREIGN.md rule 3 - and this file's own
+// borrows only, Ast.h's `own` flag telling them from the ones Resolve merged in. Every caller
+// reports and CARRIES ON rather than returning, or "'fmod' is borrowed" was followed by "Undefined variable 'fmod'" at a line that is not the mistake.
 bool Checker::refuseBorrowed(const std::string &name, int line) {
     if (program_ == nullptr) return false;
     const int asked = program_->borrowedOwnOn(name);
@@ -485,15 +450,11 @@ void Checker::visit(Binary &node) {
 }
 
 void Checker::visit(Call &node) {
-    // The program's own function wins. A builtin is what the name means when
-    // nothing in the file has claimed it, which is the rule C gets from
-    // headers - sin is <math.h>'s until you declare your own - said here
-    // without needing headers to say it.
+    // The program's own function wins: a builtin is what the name means when nothing in the file has claimed it, as sin is <math.h>'s until you declare your own.
     Function *user = program_->find(node.callee());
-    // **And only if this file borrowed it.** A library function is not
-    // available by being known; it is available by being asked for. Without
-    // the `uses` the name falls through to the ordinary search for a function
-    // in the project's other files, and is reported missing like any other.
+    // **And only if this file borrowed it.** A library function is not available by being known;
+    // it is available by being asked for. Without the `uses` the name falls through to the
+    // ordinary search for a function in the project's other files, and is reported missing like any other.
     const int which = (user != nullptr || !program_->borrows(node.callee()))
                           ? -1
                           : findBuiltin(node.callee());
@@ -530,10 +491,9 @@ void Checker::visit(Call &node) {
     Function *callee = user;
     const Prototype *declared = nullptr;
     if (!callee) {
-        // A `uses` declaration, which carries its own prototype. It is checked
-        // exactly as a written function's is - the declaration IS the contract,
-        // and it is the only thing this compiler will ever know about the
-        // callee.
+        // A `uses` declaration, which carries its own prototype. It is checked exactly as a
+        // written function's is - the declaration IS the contract, and it is the only thing this
+        // compiler will ever know about the callee.
         declared = program_->foreignNamed(node.callee());
     }
     if (!callee && declared == nullptr) {
@@ -588,23 +548,16 @@ void Checker::visit(Call &node) {
 void Checker::visit(Declare &node) {
     refuseBorrowed(node.name(), line_);
 
-    // `lookup` rather than `definedHere` for a local: a declaration may sit inside a
-    // block now, and a declared local lives for the whole call, so one inside an `if`
-    // may not shadow one outside it. `declaredLocals_` answers the other half - two
-    // SIBLING blocks each declaring 't', whose scopes never exist at the same moment
-    // for `scope_` to compare.
+    // `lookup` rather than `definedHere` for a local: a declaration may sit inside a block now, and
+    // a declared local lives for the whole call, so one inside an `if` may not shadow one outside
+    // it. `declaredLocals_` answers the other half - two SIBLING blocks each declaring 't', whose scopes never exist at the same moment for `scope_` to compare.
     const bool taken =
         inGlobalScope_ ? (scope_.definedHere(node.name()) || globals_.count(node.name()) != 0)
                        : (scope_.lookup(node.name()) != 0 ||
                           declaredLocals_.count(node.name()) != 0);
     if (taken) {
         diag_.error(unit_, line_, "Variable '" + node.name() + "' already defined");
-        // Reported, and then this carries on and declares the name anyway. Returning
-        // here left the name undefined, so every later mention of it drew a second
-        // "Undefined variable" - one mistake, two messages, and the reader is sent
-        // looking at the wrong line. The app's interpreter reports the redeclaration
-        // alone, and the differential suite caught the difference the moment a case
-        // used the name after declaring it twice.
+        // Reported, and then this carries on and declares the name anyway, or every later mention drew a second "Undefined variable" - CLAUDE.md.
     }
 
     const Type *type = node.declaredType();

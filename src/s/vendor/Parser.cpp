@@ -33,6 +33,8 @@ int Parser::lastLine() const {
 
 std::string Parser::unexpected() const {
     if (current().kind == Tok::EndOfInput) return "Program ends unfinished";
+    // Shalimar assigns and initialises with ':', and an '=' there is most often C's habit.
+    if (current().kind == Tok::Operator && current().text == "=") return "Unexpected '=' use ':'";
     return "Unexpected '" + spellingOf(current()) + "'";
 }
 
@@ -85,25 +87,16 @@ std::unique_ptr<Program> Parser::parse() {
     return failed_ ? nullptr : std::move(program);
 }
 
-// `uses sin, cos, tan` - what this file borrows from the C library.
-//
-// Global space only, and per file: see docs/FOREIGN.md. The names are taken
-// here and checked later, because whether a name is borrowable is a question
-// about the table rather than about the grammar, and a parser that answered it
-// would have to carry the table.
-//
-// The comma is required between names and forbidden after the last one, which
-// is the same rule the parameter list follows, so that `uses sin,` reads as a
-// mistake rather than as a name that has not been typed yet.
+// `uses sin, cos, tan` - what this file borrows from the C library; global space only, and per
+// file (docs/FOREIGN.md). The names are taken here and checked later, because whether a name is
+// borrowable is a question about the table rather than the grammar. The comma is required between names and forbidden after the last, as in a parameter list.
 bool Parser::parseUses(Program &program) {
     const int line = current().line;
     advance();
 
-    // Two forms, told apart by one token. `uses sin, cos` borrows from the
-    // table this compiler carries; `uses <real> = mean(a[]: real)` declares a
-    // function the LINK will provide, and carries its own prototype because
-    // nothing here can go and look one up. `<` cannot start a name, so the
-    // choice needs no lookahead beyond the token in hand.
+    // Two forms, told apart by one token. `uses sin, cos` borrows from the table this compiler
+    // carries; `uses <real> = mean(a[]: real)` declares a function the LINK will provide, and
+    // carries its own prototype because nothing here can go and look one up. `<` cannot start a name, so the choice needs no lookahead.
     if (atOperator("<")) {
         Prototype proto;
         proto.line = line;
@@ -136,10 +129,9 @@ bool Parser::parseUses(Program &program) {
     return true;
 }
 
-// The head of a function: `<outputs> = name(params)`. Shared by `fun`, which
-// follows it with a body, and by the `uses` form, which does not - a foreign
-// declaration IS a function head with nothing after it, and writing the parse
-// twice is how the two would drift apart.
+// The head of a function: `<outputs> = name(params)`. Shared by `fun`, which follows it with a
+// body, and by the `uses` form, which does not - a foreign declaration IS a function head with
+// nothing after it, and writing the parse twice is how the two would drift apart.
 bool Parser::parsePrototype(Prototype &proto) {
     if (!atOperator("<")) { failUnexpected(); return false; }
     advance();
@@ -228,14 +220,9 @@ StmtPtr Parser::parseStatement() {
 
 StmtPtr Parser::parseStatementBody() {
     if (at(Tok::PrintLine) || at(Tok::PrintInline)) return parsePrint();
-    // A declaration goes wherever a statement goes - inside an `if`, inside a loop,
-    // halfway down a function after the work has started. It was refused below the
-    // top of a function body once; the rule went so that a C program keeps its shape
-    // when it is converted rather than having every local hoisted to the top.
-    //
-    // What did NOT go is the lifetime. A declared local is still the whole call's, so
-    // Checker refuses a second declaration of the same name anywhere in the function
-    // and ends the name's visibility with its block. §6 of the specification.
+    // A declaration goes wherever a statement goes - the rule against it below the top of a body went so that a
+    // converted C program keeps its shape. What did NOT go is the lifetime: a declared local is still the whole call's,
+    // so Checker refuses a second declaration anywhere in the function and ends the name's visibility with its block (§6).
     if (atDeclaration()) return parseDeclaration();
     if (at(Tok::If))    return parseIf();
     if (at(Tok::While)) return parseWhile();

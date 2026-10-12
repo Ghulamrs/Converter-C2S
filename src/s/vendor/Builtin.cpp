@@ -6,22 +6,9 @@
 namespace shalimar {
 namespace {
 
-// **The symbol each one calls.** Where it is a C library name - `sin`, `fabs` -
-// shc emits a call straight to it and the linker resolves it from libm: no
-// wrapper, no generated C, nothing added to the runtime archive. That is what
-// lets the borrowable set grow without the archive growing. docs/FOREIGN.md.
-//
-// Five are NOT library calls and must not become them:
-//
-//   shm_fn_abs_int   traps on INT_MIN rather than negating it. C's abs() is
-//                    undefined there, so this is a different function that
-//                    happens to share a name.
-//   shm_fn_max_real  `a > b ? a : b`, which propagates NaN. fmax() returns the
-//   shm_fn_min_real  non-NaN operand instead, so swapping them changes answers.
-//   shm_fn_max_int   the C library has no integer max or min at all.
-//   shm_fn_min_int
-//
-// `len` is the array handle's own and never was C's.
+// **The symbol each one calls.** Where it is a C library name - `sin`, `fabs` - shc emits a call
+// straight to it and the linker resolves it from libm, with nothing added to the runtime archive.
+// Five are NOT library calls and must not become them - abs_int traps on INT_MIN, max/min propagate NaN, and C has no integer max or min: docs/FOREIGN.md.
 const Builtin table[] = {
     {"abs",   1, Builtin::Shape::IntOrReal, "fabs", "shm_fn_abs_int"},
     {"sqrt",  1, Builtin::Shape::Real,      "sqrt",     nullptr},
@@ -42,11 +29,9 @@ const Builtin table[] = {
 
     {"trunc", 1, Builtin::Shape::Real,      "trunc",    nullptr},
 
-    // Added 2026-08-26, and each one is a row and nothing else: the symbol is
-    // libm's, so there is no wrapper to write and the archive does not grow.
-    // C99 rather than C89 - log2, cbrt and the hyperbolics postdate the
-    // standard Compiler-C targets - but this is a call into the platform's
-    // libm, not a C program, and all three of ours have them.
+    // Added 2026-08-26, and each one is a row and nothing else: the symbol is libm's, so there is
+    // no wrapper to write and the archive does not grow. C99 rather than C89 - log2, cbrt and the
+    // hyperbolics postdate the standard Compiler-C targets - but this is a call into the platform's libm, not a C program, and all three of ours have them.
     {"fmod",  2, Builtin::Shape::Real,      "fmod",     nullptr},
     {"sinh",  1, Builtin::Shape::Real,      "sinh",     nullptr},
     {"cosh",  1, Builtin::Shape::Real,      "cosh",     nullptr},
@@ -64,15 +49,9 @@ const int count = static_cast<int>(sizeof table / sizeof table[0]);
 
 }
 
-// Names a person will reasonably try, and the reason each one cannot be
-// borrowed. Not a blocklist: every entry here is refused because its C
-// signature needs a type Shalimar does not have, and saying which type is the
-// difference between an answer and a refusal. docs/FOREIGN.md explains why
-// the boundary falls exactly here.
-//
-// The list is short on purpose. It exists to turn the most likely mistakes
-// into instructions; anything not on it still gets a plain "not a library
-// function this compiler knows", which is true and not misleading.
+// Names a person will reasonably try, and the reason each one cannot be borrowed: every entry
+// is refused because its C signature needs a type Shalimar does not have, and saying which type
+// is the difference between an answer and a refusal (docs/FOREIGN.md). Anything not on it still gets a plain "not a library function this compiler knows".
 namespace {
 struct Unborrowable { const char *name; const char *why; };
 const Unborrowable kUnborrowable[] = {
