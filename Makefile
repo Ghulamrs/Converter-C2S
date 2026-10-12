@@ -52,7 +52,7 @@ DEPS := $(OBJS:.o=.d)
 # The two compilers are siblings of this tree and are used as oracles by the
 # test suite. Nothing here compiles or links their sources - this converter is
 # self-contained, and their repositories are not modified.
-CC1 ?= ../Compiler-C/cc1.exe
+CC1 ?= ../../Compiler-C/cc1.exe
 SHC ?= ../Compiler-Si/shalimar.exe
 
 # Where the two repositories are, as opposed to the two binaries. Only the

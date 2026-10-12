@@ -13,7 +13,7 @@
 #   powershell -ExecutionPolicy Bypass -File tests\run.ps1
 #
 # C2S, CC1 and SHC override where the binaries are, as in the shell version.
-# The default is ..\RStudio\x64\Release, the solution's output directory,
+# The default is ..\..\RStudio\x64\Release, the solution's output directory,
 # where all five programs and shc's runtime land together.
 #
 # Two differences from the shell script, both of them Windows and neither of
